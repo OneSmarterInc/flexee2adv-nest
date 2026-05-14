@@ -36,6 +36,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '@/entities/index.entity';
 import { SimulationService } from './simulation.service';
+import { UpdateModuleScheduleDto } from './dto/update-module-schedule.dto';
 
 @ApiTags('Simulations')
 @Controller('simulations')
@@ -503,6 +504,45 @@ export class SimulationController {
       simulationId,
       updateFeaturesDto,
     );
+  }
+
+  // ============================================================================
+  // MODULE SCHEDULE — Advanced module activation by quarter
+  // ============================================================================
+
+  @Get(':simulationId/module-schedule')
+  @ApiOperation({
+    summary: 'Get module activation schedule',
+    description:
+      'Returns the scheduled quarter at which each advanced module opens, ' +
+      'along with current open/locked/scheduled state per module.',
+  })
+  @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
+  @ApiResponse({ status: 200, description: 'Module schedule retrieved' })
+  async getModuleSchedule(@Param('simulationId') simulationId: string) {
+    return this.simulationService.getModuleSchedule(simulationId);
+  }
+
+  @Patch(':simulationId/module-schedule')
+  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update module activation schedule',
+    description:
+      'Defer or accelerate when advanced modules auto-open. Setting a ' +
+      'value to 0 unschedules that module. Setting a value <= current ' +
+      'quarter opens the module immediately on save.',
+  })
+  @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
+  @ApiResponse({ status: 200, description: 'Module schedule updated' })
+  @ApiForbiddenResponse({
+    description: 'Only admins and faculty can update the module schedule',
+  })
+  async updateModuleSchedule(
+    @Param('simulationId') simulationId: string,
+    @Body() dto: UpdateModuleScheduleDto,
+  ) {
+    return this.simulationService.updateModuleSchedule(simulationId, dto);
   }
 
   // ============================================================================

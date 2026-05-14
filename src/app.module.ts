@@ -8,6 +8,7 @@ import { UsersModule } from './modules/users/users.module';
 import { SimulationModule } from './modules/simulation/simulation.module';
 import { DecisionModule } from './modules/decision/decision.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     SimulationModule,
     DecisionModule,
     ReportsModule,
+    OnboardingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

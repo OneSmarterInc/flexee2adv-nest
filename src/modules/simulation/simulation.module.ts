@@ -39,6 +39,10 @@ import {
   SCRMHistorySchema,
   EventImpact,
   EventImpactSchema,
+  Technology,
+  TechnologySchema,
+  StudentOnboarding,
+  StudentOnboardingSchema,
 } from '../../entities/index.entity';
 
 @Module({
@@ -62,6 +66,8 @@ import {
       { name: CreditHistory.name, schema: CreditHistorySchema },
       { name: SCRMHistory.name, schema: SCRMHistorySchema },
       { name: EventImpact.name, schema: EventImpactSchema },
+      { name: Technology.name, schema: TechnologySchema },
+      { name: StudentOnboarding.name, schema: StudentOnboardingSchema },
     ]),
   ],
   controllers: [SimulationController],

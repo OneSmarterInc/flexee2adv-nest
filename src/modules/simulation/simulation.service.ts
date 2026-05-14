@@ -21,6 +21,15 @@ import {
 } from './dto/enroll-students.dto';
 import { TriggerEventDto } from './dto/trigger-event.dto';
 import { UpdateFeaturesDto } from './dto/update-features.dto';
+import { ModuleScheduleDto } from './dto/create-simulation.dto';
+import {
+  buildScheduleFromDto,
+  mergeScheduleUpdate,
+  syncFeaturesFromSchedule,
+  getScheduleStatus,
+} from './helpers/module-schedule';
+import { maybeAutoAdvance } from './helpers/auto-advance';
+import { ModuleSchedule } from '@/entities/index.entity';
 import {
   Simulation,
   SimulationDocument,
@@ -82,6 +91,10 @@ import {
   RegionalDCResult,
   MultiCarrierResult,
   DCSalesResult,
+  Technology,
+  TechnologyDocument,
+  StudentOnboarding,
+  StudentOnboardingDocument,
 } from '../../entities/index.entity';
 import {
   processCustomerPools,
@@ -329,6 +342,10 @@ export class SimulationService {
     private scrmHistoryModel: Model<SCRMHistoryDocument>,
     @InjectModel(EventImpact.name)
     private eventImpactModel: Model<EventImpactDocument>,
+    @InjectModel(Technology.name)
+    private technologyModel: Model<TechnologyDocument>,
+    @InjectModel(StudentOnboarding.name)
+    private studentOnboardingModel: Model<StudentOnboardingDocument>,
   ) {}
 
   // ============================================================================
@@ -686,6 +703,10 @@ export class SimulationService {
       startingCash: dto.startingCash ?? 50_000_000,
       totalMarketSize: dto.totalMarketSize ?? CONFIG.market.TOTAL_MARKET_SIZE,
       features: this.buildFeatureToggles(dto.features),
+      moduleSchedule: buildScheduleFromDto(
+        dto.moduleSchedule as any,
+      ),
+      quarterDurationDays: dto.quarterDurationDays ?? 14,
       seasonality: dto.seasonality ?? {
         q1Multiplier: CONFIG.seasonality.QUARTERS[1],
         q2Multiplier: CONFIG.seasonality.QUARTERS[2],
@@ -770,12 +791,30 @@ export class SimulationService {
       savedSimulation.currentQuarter =
         CONFIG.simulation.PREHISTORY_QUARTERS + 1;
       savedSimulation.status = SimulationStatus.INITIALIZED;
+
+      // Open quarter window for the first decision quarter
+      const startedAt = new Date();
+      savedSimulation.quarterStartedAt = startedAt;
+      savedSimulation.quarterEndsAt = new Date(
+        startedAt.getTime() +
+          savedSimulation.quarterDurationDays * 24 * 60 * 60 * 1000,
+      );
+
+      // Flip features ON for any modules unlocking at Q4
+      const initSync = syncFeaturesFromSchedule(
+        savedSimulation.moduleSchedule,
+        savedSimulation.features as any,
+        savedSimulation.currentQuarter,
+      );
+      savedSimulation.features = initSync.features as any;
+      savedSimulation.markModified('features');
+
       await savedSimulation.save();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating simulation:', error);
       await this.cleanupFailedSimulation(simulationId);
       throw new BadRequestException(
-        `Failed to create simulation: ${error.message}`,
+        `Failed to create simulation: ${error?.message || String(error)}`,
       );
     }
 
@@ -809,16 +848,17 @@ export class SimulationService {
   private async cleanupFailedSimulation(
     simulationId: Types.ObjectId,
   ): Promise<void> {
-    // First, get all firms for this simulation to delete related enrollments
+    // Capture firmIds first — enrollments may reference firms whose
+    // simulation pointer is null or detached, so a $or covers both paths.
     const firms = await this.firmModel.find({ simulation: simulationId });
     const firmIds = firms.map((f) => f._id);
 
+    // Delete dependents first, then the simulation itself last. This
+    // ordering means if a delete partially fails, the simulation doc
+    // is still there and the cleanup can be retried.
     await Promise.all([
-      // Core simulation data
-      this.simulationModel.deleteOne({ _id: simulationId }),
+      // Firms and their derived data
       this.firmModel.deleteMany({ simulation: simulationId }),
-
-      // Enrollment and enrollment-related data
       this.enrollmentModel.deleteMany({
         $or: [{ simulation: simulationId }, { firm: { $in: firmIds } }],
       }),
@@ -832,8 +872,9 @@ export class SimulationService {
       this.decisionModel.deleteMany({ simulation: simulationId }),
       this.creditHistoryModel.deleteMany({ simulation: simulationId }),
 
-      // Events and reports
+      // Events, event impacts, and reports
       this.eventModel.deleteMany({ simulation: simulationId }),
+      this.eventImpactModel.deleteMany({ simulation: simulationId }),
       this.intelligenceReportModel.deleteMany({ simulation: simulationId }),
       this.tenqReportModel.deleteMany({ simulation: simulationId }),
 
@@ -841,13 +882,21 @@ export class SimulationService {
       this.warrantyClaimModel.deleteMany({ simulation: simulationId }),
       this.greenScoreHistoryModel.deleteMany({ simulation: simulationId }),
 
-      // Supplier and forecast data
+      // Supplier, forecast, and tech investment data
       this.supplierOrderModel.deleteMany({ simulation: simulationId }),
       this.forecastLogModel.deleteMany({ simulation: simulationId }),
+      this.technologyModel.deleteMany({ simulation: simulationId }),
 
-      // Supply chain risk management data
+      // Supply chain risk management
       this.scrmHistoryModel.deleteMany({ simulation: simulationId }),
+
+      // Student onboarding (invites)
+      this.studentOnboardingModel.deleteMany({ simulation: simulationId }),
     ]);
+
+    // Delete the simulation itself last so a partial failure leaves a
+    // retry-able state instead of orphaned dependents under a missing parent.
+    await this.simulationModel.deleteOne({ _id: simulationId });
   }
   // ============================================================================
   // INITIAL QUARTER STATE (Q0)
@@ -3300,7 +3349,7 @@ export class SimulationService {
     } else {
       const enrollments = await this.enrollmentModel.find({
         user: this.toObjectId(userId),
-        status: { $in: [EnrollmentStatus.ACTIVE, EnrollmentStatus.PENDING] },
+        status: { $in: [EnrollmentStatus.ACTIVE, EnrollmentStatus.PENDING_FIRM_ASSIGNMENT] },
       });
       simulations = await this.simulationModel
         .find({
@@ -3333,7 +3382,13 @@ export class SimulationService {
 
   async findOne(simulationId: string): Promise<any> {
     const simObjectId = this.toObjectId(simulationId);
-    const simulation = await this.simulationModel.findById(simObjectId);
+    let simulation = await this.simulationModel.findById(simObjectId);
+    if (!simulation)
+      throw new NotFoundException(`Simulation ${simulationId} not found`);
+
+    simulation = (await this.withAutoAdvanceCheck(
+      simulation as SimulationDocument,
+    )) as any;
     if (!simulation)
       throw new NotFoundException(`Simulation ${simulationId} not found`);
 
@@ -4385,6 +4440,74 @@ export class SimulationService {
     };
   }
 
+  async updateModuleSchedule(
+    simulationId: string,
+    dto: { mode?: string; modules?: any[] },
+  ): Promise<any> {
+    const simObjectId = this.toObjectId(simulationId);
+    const simulation = await this.simulationModel.findById(simObjectId);
+    if (!simulation) {
+      throw new NotFoundException(`Simulation ${simulationId} not found`);
+    }
+
+    // Merge incoming changes into the existing schedule
+    simulation.moduleSchedule = mergeScheduleUpdate(
+      simulation.moduleSchedule,
+      dto,
+    );
+    simulation.markModified('moduleSchedule');
+
+    // Apply any modules now eligible for the current quarter
+    const syncResult = syncFeaturesFromSchedule(
+      simulation.moduleSchedule,
+      simulation.features as any,
+      simulation.currentQuarter,
+    );
+    simulation.features = syncResult.features as any;
+    if (syncResult.opened.length > 0) {
+      simulation.markModified('features');
+    }
+
+    await simulation.save();
+
+    return {
+      simulationId,
+      moduleSchedule: simulation.moduleSchedule,
+      features: simulation.features,
+      openedNow: syncResult.opened,
+      message:
+        syncResult.opened.length > 0
+          ? `Schedule updated. Modules opened immediately: ${syncResult.opened.join(', ')}`
+          : 'Schedule updated.',
+    };
+  }
+
+  async getModuleSchedule(simulationId: string): Promise<any> {
+    const simObjectId = this.toObjectId(simulationId);
+    const simulation = await this.simulationModel.findById(simObjectId);
+    if (!simulation) {
+      throw new NotFoundException(`Simulation ${simulationId} not found`);
+    }
+
+    const status = getScheduleStatus(
+      simulation.moduleSchedule,
+      simulation.features as any,
+      simulation.currentQuarter,
+    );
+
+    return {
+      simulationId,
+      currentQuarter: simulation.currentQuarter,
+      moduleSchedule: simulation.moduleSchedule,
+      status,
+      pacing: {
+        quarterDurationDays: simulation.quarterDurationDays,
+        quarterStartedAt: simulation.quarterStartedAt,
+        quarterEndsAt: simulation.quarterEndsAt,
+      },
+    };
+  }
+
   // ============================================================================
   // UI CONTROLS - QUARTER DATA VISIBILITY
   // ============================================================================
@@ -4449,12 +4572,12 @@ export class SimulationService {
         return {
           hasAccess: false,
           role: enrollment.role,
-          firmId: enrollment.firm.toString(),
+          firmId: enrollment.firm?.toString() ?? undefined,
         };
       return {
         hasAccess: true,
         role: enrollment.role,
-        firmId: enrollment.firm.toString(),
+        firmId: enrollment.firm?.toString() ?? undefined,
       };
     }
     return { hasAccess: false, role: 'none' };
@@ -4492,18 +4615,20 @@ export class SimulationService {
     const enrollments = await this.enrollmentModel
       .find({
         user: this.toObjectId(studentId),
-        status: { $in: [EnrollmentStatus.ACTIVE, EnrollmentStatus.PENDING] },
+        status: { $in: [EnrollmentStatus.ACTIVE, EnrollmentStatus.PENDING_FIRM_ASSIGNMENT] },
       })
       .populate('simulation')
       .populate('firm');
     return enrollments.map((enrollment) => ({
       simulation: enrollment.simulation,
-      firm: {
-        id: (enrollment.firm as any)._id,
-        firmNumber: (enrollment.firm as any).firmNumber,
-        name: (enrollment.firm as any).name,
-        color: (enrollment.firm as any).color,
-      },
+      firm: enrollment.firm
+        ? {
+            id: (enrollment.firm as any)._id,
+            firmNumber: (enrollment.firm as any).firmNumber,
+            name: (enrollment.firm as any).name,
+            color: (enrollment.firm as any).color,
+          }
+        : null,
       enrollment: {
         id: enrollment._id,
         status: enrollment.status,
@@ -4518,8 +4643,43 @@ export class SimulationService {
   }
 
   // ============================================================================
+  // AUTO-ADVANCE CHECK WRAPPER
+  // ============================================================================
+
+  /**
+   * Wraps a simulation fetch with the auto-advance check. Use from every
+   * read method that surfaces a simulation to a caller. If the window has
+   * expired, this carries forward missing submissions and advances the
+   * quarter, then returns the fresh document.
+   */
+  private async withAutoAdvanceCheck(
+    sim: SimulationDocument | null,
+  ): Promise<SimulationDocument | null> {
+    if (!sim) return sim;
+
+    const result = await maybeAutoAdvance(sim, {
+      decisionModel: this.decisionModel,
+      firmModel: this.firmModel,
+      simulationModel: this.simulationModel,
+      advanceQuarter: this.advanceQuarter.bind(this),
+    });
+
+    if (result.advanced) {
+      console.log(
+        `[autoAdvance] ${sim._id} advanced Q${result.fromQuarter} → ` +
+          `Q${result.toQuarter} (carried forward: ${result.carriedForwardFirms?.join(', ') || 'none'})`,
+      );
+      const reloaded = await this.simulationModel.findById(sim._id);
+      if (reloaded) return reloaded as SimulationDocument;
+    }
+
+    return sim;
+  }
+
+  // ============================================================================
   // HELPER: RESOLVE FIRM
   // ============================================================================
+
 
   private async resolveFirm(
     simulationId: string,
@@ -4660,7 +4820,28 @@ export class SimulationService {
     simulation.currentQuarter += 1;
     const nextQuarter = simulation.currentQuarter;
 
-    // Update simulation status based on quarter progression
+    // Sync features from schedule for the new quarter
+    const syncResult = syncFeaturesFromSchedule(
+      simulation.moduleSchedule,
+      simulation.features as any,
+      nextQuarter,
+    );
+    simulation.features = syncResult.features as any;
+    if (syncResult.opened.length > 0) {
+      simulation.markModified('features');
+      console.log(
+        `[Q${nextQuarter}] Auto-opened modules: ${syncResult.opened.join(', ')}`,
+      );
+    }
+
+    // Open the next quarter's window
+    const newStartedAt = new Date();
+    simulation.quarterStartedAt = newStartedAt;
+    simulation.quarterEndsAt = new Date(
+      newStartedAt.getTime() +
+        simulation.quarterDurationDays * 24 * 60 * 60 * 1000,
+    );
+
     if (previousQuarter === 3 && nextQuarter === 4) {
       simulation.status = SimulationStatus.IN_PROGRESS;
     }

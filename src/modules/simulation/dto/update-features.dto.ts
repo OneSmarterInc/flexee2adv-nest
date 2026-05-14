@@ -90,4 +90,20 @@ export class UpdateFeaturesDto {
   @IsOptional()
   @IsBoolean()
   analyticsMode?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Enable Product Innovation (P3 launch)',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  productInnovation?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Enable Market Expansion (R4-R6)',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  marketExpansion?: boolean;
 }

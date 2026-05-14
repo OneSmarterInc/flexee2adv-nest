@@ -99,7 +99,7 @@ export enum UserRole {
 }
 
 export enum EnrollmentStatus {
-  PENDING = 'PENDING',
+  PENDING_FIRM_ASSIGNMENT = 'PENDING_FIRM_ASSIGNMENT',
   ACTIVE = 'ACTIVE',
   COMPLETED = 'COMPLETED',
   DROPPED = 'DROPPED',
@@ -116,6 +116,19 @@ export enum WarrantyTier {
   BASIC = 'BASIC',
   STANDARD = 'STANDARD',
   PREMIUM = 'PREMIUM',
+}
+
+export enum ModuleScheduleMode {
+  PROGRESSIVE = 'PROGRESSIVE',
+  ALL_OPEN = 'ALL_OPEN',
+  CUSTOM = 'CUSTOM',
+}
+
+export enum InviteStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  EXPIRED = 'EXPIRED',
 }
 
 export enum DisposalMethod {
@@ -246,6 +259,44 @@ export class FeatureToggles {
 
   @Prop({ default: false })
   marketExpansion: boolean; // Regions 4-6 (R4, R5, R6) market entry
+}
+
+const ADVANCED_MODULE_IDS = [
+  'capacityExpansion',
+  'regionalDCs',
+  'multiCarrierSelection',
+  'returnsGreenScore',
+  'intelligenceCenter',
+  'vmi',
+  'analyticsMode',
+  'productInnovation',
+  'marketExpansion',
+] as const;
+
+export type AdvancedModuleId = typeof ADVANCED_MODULE_IDS[number];
+
+@Schema({ _id: false })
+export class AdvancedModuleConfig {
+  @Prop({ required: true, enum: ADVANCED_MODULE_IDS })
+  moduleId: AdvancedModuleId;
+
+  @Prop({ required: true })
+  order: number;
+
+  @Prop({ required: true, min: 1 })
+  unlocksAtQuarter: number;
+
+  @Prop({ default: true })
+  enabled: boolean;
+}
+
+@Schema({ _id: false })
+export class ModuleSchedule {
+  @Prop({ enum: ModuleScheduleMode, default: ModuleScheduleMode.ALL_OPEN })
+  mode: ModuleScheduleMode;
+
+  @Prop({ type: [AdvancedModuleConfig], default: () => [] })
+  modules: AdvancedModuleConfig[];
 }
 
 @Schema({ _id: false })
@@ -397,6 +448,28 @@ export class Simulation {
   @Prop({ type: FeatureToggles, default: () => ({}) })
   features: FeatureToggles;
 
+  // Scheduled module activation by quarter (faculty sets at creation time)
+  @Prop({ type: ModuleSchedule, default: () => ({}) })
+  moduleSchedule: ModuleSchedule;
+
+  // ── Quarter pacing ──────────────────────────────────────────────────────
+  // How many real-world days each simulated quarter lasts. Set at creation
+  // time, applies to every quarter for the life of the sim. Default 14.
+  @Prop({ default: 14, min: 1, max: 90 })
+  quarterDurationDays: number;
+
+  // When the currently-active quarter opened. Set on each call to
+  // advanceQuarter (and on initial sim create). The auto-advance check
+  // uses this + quarterDurationDays to decide whether the window has closed.
+  @Prop({ type: Date, default: null })
+  quarterStartedAt: Date | null;
+
+  // Convenience field — same as quarterStartedAt + quarterDurationDays days.
+  // Stored rather than derived so the cockpit can render a countdown without
+  // doing date math on every render.
+  @Prop({ type: Date, default: null })
+  quarterEndsAt: Date | null;
+
   // Seasonality (embedded)
   @Prop({ type: SeasonalityConfig, default: () => ({}) })
   seasonality: SeasonalityConfig;
@@ -427,6 +500,19 @@ export class Simulation {
 }
 
 export const SimulationSchema = SchemaFactory.createForClass(Simulation);
+
+// Helper methods
+SimulationSchema.methods.isModuleUnlocked = function (
+  this: any,
+  moduleId: AdvancedModuleId,
+): boolean {
+  if (!this.moduleSchedule?.modules) return false;
+  const config = this.moduleSchedule.modules.find(
+    (m: any) => m.moduleId === moduleId,
+  );
+  if (!config || !config.enabled) return false;
+  return (this.currentQuarter || 0) >= config.unlocksAtQuarter;
+} as any;
 
 // Indexes
 SimulationSchema.index({ owner: 1 });
@@ -1810,16 +1896,16 @@ export class Enrollment {
   @Prop({ type: Types.ObjectId, ref: 'Simulation', required: true })
   simulation: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Firm', required: true })
-  firm: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Firm', default: null })
+  firm: Types.ObjectId | null;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   user: Types.ObjectId;
 
-  @Prop({ required: true })
-  firmNumber: number;
+  @Prop({ type: Number, default: null, min: 1, max: 6 })
+  firmNumber: number | null;
 
-  @Prop({ enum: EnrollmentStatus, default: EnrollmentStatus.PENDING })
+  @Prop({ enum: EnrollmentStatus, default: EnrollmentStatus.PENDING_FIRM_ASSIGNMENT })
   status: EnrollmentStatus;
 
   @Prop({ enum: EnrollmentRole, default: EnrollmentRole.TEAM_MEMBER })
@@ -2832,6 +2918,89 @@ export interface RegionalDCResult {
   inventoryAllocated: number;
   inventoryReturnedToFactory: number;
 }
+
+// ============================================================================
+// STUDENT ONBOARDING SCHEMA (DA Flow)
+// ============================================================================
+
+export type StudentOnboardingDocument = StudentOnboarding & Document;
+
+@Schema({ timestamps: true, collection: 'student_onboardings' })
+export class StudentOnboarding {
+  @Prop({ type: Types.ObjectId, ref: 'Simulation', required: true })
+  simulation: Types.ObjectId;
+
+  // Optional firm assignment at invite time. Faculty can assign to a firm
+  // up front, or leave it null and have the student pick a firm at accept.
+  @Prop({ type: Types.ObjectId, ref: 'Firm', default: null })
+  firm: Types.ObjectId | null;
+
+  @Prop({ type: Number, default: null })
+  firmNumber: number | null;
+
+  // Email is the invite key. A user record may not exist yet — that's the
+  // whole point of this flow. When the student accepts, we either link to
+  // an existing User by email or create one.
+  @Prop({ required: true, lowercase: true, trim: true })
+  email: string;
+
+  // Once accepted, this points to the User record (existing or freshly created)
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  user: Types.ObjectId | null;
+
+  // Cryptographic invite token. Sent to student via email; required to accept.
+  @Prop({ required: true, unique: true })
+  inviteToken: string;
+
+  @Prop({ enum: InviteStatus, default: InviteStatus.PENDING })
+  status: InviteStatus;
+
+  // Faculty member who created the invite
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  invitedBy: Types.ObjectId;
+
+  // Optional personal note from faculty included in the invite email
+  @Prop()
+  inviteMessage?: string;
+
+  // 30-day expiry by default. Status flips to EXPIRED on access after this.
+  @Prop({ default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) })
+  expiresAt: Date;
+
+  @Prop()
+  acceptedAt?: Date;
+
+  @Prop()
+  rejectedAt?: Date;
+
+  // Email notification tracking — set true once the email send succeeded
+  @Prop({ default: false })
+  sentEmailNotification: boolean;
+
+  @Prop()
+  emailSentAt?: Date;
+
+  // Bulk import grouping — every row in a single CSV upload shares this ID
+  // so faculty can see "Spring 2026 cohort upload" as a single batch in
+  // the management UI. Null for one-off invites.
+  @Prop()
+  bulkImportId?: string;
+
+  @Prop()
+  rowNumber?: number;
+}
+
+export const StudentOnboardingSchema =
+  SchemaFactory.createForClass(StudentOnboarding);
+
+StudentOnboardingSchema.index(
+  { simulation: 1, email: 1 },
+  { unique: true },
+);
+StudentOnboardingSchema.index({ inviteToken: 1 }, { unique: true });
+StudentOnboardingSchema.index({ status: 1, expiresAt: 1 });
+StudentOnboardingSchema.index({ user: 1 });
+StudentOnboardingSchema.index({ bulkImportId: 1 });
 
 /**
  * Result from processing Multi-Carrier Selection
