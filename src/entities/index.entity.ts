@@ -1794,6 +1794,23 @@ export class KpiHistory {
     inTransitUnits: number;
   };
 
+  // Demand & channel position. Revenue is booked on shipments into the retail
+  // channel, not on consumer sales, so without this a firm can see demand and
+  // unsold stock with no way to tell that the retailer simply stopped ordering.
+  @Prop({ type: Object })
+  channel: {
+    marketDemand: number;
+    seasonalMultiplier: number;
+    firmDemand: number;
+    retailDemand: number;
+    directDemand: number;
+    shipmentToRetailer: number;
+    retailSales: number;
+    directSales: number;
+    retailerMode: string;
+    retailerCoverageMonths: number;
+  };
+
   // Learning & Growth
   @Prop({ type: Object })
   learning: {

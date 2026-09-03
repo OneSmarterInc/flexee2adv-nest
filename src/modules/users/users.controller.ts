@@ -73,6 +73,32 @@ export class UsersController {
     return this.usersService.findAdminUsers();
   }
 
+  // The UI was renamed student/faculty/admin -> participant/facilitator/
+  // administrator. Roles are still persisted under the original names, so these
+  // aliases let the renamed client call the vocabulary it actually uses instead
+  // of 404ing. Same handlers, no duplicated logic.
+  @Get('participants')
+  @ApiOperation({ summary: 'Get all participants (alias of /users/students)' })
+  @ApiResponse({ status: 200, description: 'Participants retrieved successfully' })
+  async findParticipants(): Promise<User[]> {
+    return this.usersService.findStudentUsers();
+  }
+
+  @Get('facilitators')
+  @ApiOperation({ summary: 'Get all facilitators (alias of /users/faculty)' })
+  @ApiResponse({ status: 200, description: 'Facilitators retrieved successfully' })
+  async findFacilitators(): Promise<User[]> {
+    return this.usersService.findFacultyUsers();
+  }
+
+  @Get('administrators')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get all administrators (alias of /users/admins)' })
+  @ApiResponse({ status: 200, description: 'Administrators retrieved successfully' })
+  async findAdministrators(): Promise<User[]> {
+    return this.usersService.findAdminUsers();
+  }
+
   /**
    * Get user statistics (Admin only)
    */

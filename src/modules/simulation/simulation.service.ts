@@ -135,6 +135,18 @@ interface DemandData {
 interface QuarterResult {
   firmId: Types.ObjectId;
   firmNumber: number;
+  // Demand and channel position - what the market offered, what the retail
+  // channel actually pulled, and what was sold direct.
+  marketDemand: number;
+  seasonalMultiplier: number;
+  firmDemand: number;
+  retailDemand: number;
+  directDemand: number;
+  shipmentToRetailer: number;
+  retailSales: number;
+  directSales: number;
+  retailerMode: RetailerMode;
+  retailerCoverageMonths: number;
   revenue: number;
   netIncome: number;
   grossProfit: number;
@@ -1694,15 +1706,20 @@ export class SimulationService {
     let retailerInventory = prevState.retailerInventory || 0;
     let retailerMode: RetailerMode = RetailerMode.NORMAL;
     let shipmentToRetailer = Math.round(retailDemand * 1.1); // Default 10% buffer
+    // Hoisted so the channel position can be reported. Students could see that
+    // finished goods were not selling but had no way to see why: the retailer's
+    // own coverage is what decides how much it orders.
+    const retailerMonthlyDemand = retailDemand / 3;
+    const retailerCoverageMonths =
+      retailerMonthlyDemand > 0
+        ? retailerInventory / retailerMonthlyDemand
+        : R.INVENTORY_TARGET_MONTHS;
 
     if (features.retailerBrain) {
       // Full retailer brain logic with panic/clearance modes
       // FIX: single declaration of monthlyDemand used throughout this block
-      const monthlyDemand = retailDemand / 3;
-      const coverageMonths =
-        monthlyDemand > 0
-          ? retailerInventory / monthlyDemand
-          : R.INVENTORY_TARGET_MONTHS;
+      const monthlyDemand = retailerMonthlyDemand;
+      const coverageMonths = retailerCoverageMonths;
 
       let panicThreshold = R.PANIC_THRESHOLD_MONTHS;
       let clearanceThreshold = R.CLEARANCE_THRESHOLD_MONTHS;
@@ -2537,6 +2554,16 @@ export class SimulationService {
       poInFull: inFull,
       poDamageFree: damageFree,
       poDocumentation: documentation,
+      marketDemand: demandData.totalDemand,
+      seasonalMultiplier: demandData.seasonalMultiplier,
+      firmDemand: totalFirmDemand,
+      retailDemand,
+      directDemand,
+      shipmentToRetailer,
+      retailSales,
+      directSales,
+      retailerMode,
+      retailerCoverageMonths,
       vmiSnapshot,
     };
   }
@@ -3352,6 +3379,18 @@ export class SimulationService {
           weeksOfSupply,
           retailerInventory: result.retailerInventory,
           inTransitUnits: result.inTransitUnits,
+        },
+        channel: {
+          marketDemand: result.marketDemand,
+          seasonalMultiplier: result.seasonalMultiplier,
+          firmDemand: result.firmDemand,
+          retailDemand: result.retailDemand,
+          directDemand: result.directDemand,
+          shipmentToRetailer: result.shipmentToRetailer,
+          retailSales: result.retailSales,
+          directSales: result.directSales,
+          retailerMode: result.retailerMode,
+          retailerCoverageMonths: result.retailerCoverageMonths,
         },
         learning: {
           techSystemsCount: firm.techOwned.length,
