@@ -1,4 +1,4 @@
-import { User, UserDocument, UserRole } from '../../entities/index.entity';
+import { User, UserDocument, UserRole, roleVariants } from '../../entities/index.entity';
 import {
   Injectable,
   BadRequestException,
@@ -44,7 +44,7 @@ export class UsersService {
    */
   async findFacultyUsers(): Promise<User[]> {
     return this.userModel
-      .find({ role: UserRole.FACULTY, isActive: true })
+      .find({ role: { $in: roleVariants(UserRole.FACULTY) }, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .exec();
   }
@@ -54,7 +54,7 @@ export class UsersService {
    */
   async findStudentUsers(): Promise<User[]> {
     return this.userModel
-      .find({ role: UserRole.STUDENT, isActive: true })
+      .find({ role: { $in: roleVariants(UserRole.STUDENT) }, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .exec();
   }
@@ -64,7 +64,7 @@ export class UsersService {
    */
   async findAdminUsers(): Promise<User[]> {
     return this.userModel
-      .find({ role: UserRole.ADMIN, isActive: true })
+      .find({ role: { $in: roleVariants(UserRole.ADMIN) }, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .exec();
   }
@@ -216,14 +216,14 @@ export class UsersService {
     limit: number = 10,
   ): Promise<{ users: User[]; total: number }> {
     const users = await this.userModel
-      .find({ role, isActive: true })
+      .find({ role: { $in: roleVariants(role) }, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .skip(skip)
       .limit(limit)
       .exec();
 
     const total = await this.userModel.countDocuments({
-      role,
+      role: { $in: roleVariants(role) },
       isActive: true,
     });
 
@@ -241,12 +241,12 @@ export class UsersService {
     activeUsers: number;
   }> {
     const totalUsers = await this.userModel.countDocuments();
-    const admins = await this.userModel.countDocuments({ role: UserRole.ADMIN });
+    const admins = await this.userModel.countDocuments({ role: { $in: roleVariants(UserRole.ADMIN) } });
     const faculty = await this.userModel.countDocuments({
-      role: UserRole.FACULTY,
+      role: { $in: roleVariants(UserRole.FACULTY) },
     });
     const students = await this.userModel.countDocuments({
-      role: UserRole.STUDENT,
+      role: { $in: roleVariants(UserRole.STUDENT) },
     });
     const activeUsers = await this.userModel.countDocuments({ isActive: true });
 

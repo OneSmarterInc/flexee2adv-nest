@@ -96,6 +96,39 @@ export enum UserRole {
   STUDENT = 'STUDENT',
   FACULTY = 'FACULTY',
   ADMIN = 'ADMIN',
+  // The product was renamed and user records are already being written with
+  // the new vocabulary. Both spellings are valid values so that a save() on an
+  // existing document cannot fail schema validation - which is exactly what
+  // broke login for every renamed user (auth.service updates lastLoginAt and
+  // saves, and Mongoose validates the whole document).
+  PARTICIPANT = 'PARTICIPANT',
+  FACILITATOR = 'FACILITATOR',
+  ADMINISTRATOR = 'ADMINISTRATOR',
+}
+
+/** Old and new spellings collapse to one canonical role. */
+const ROLE_CANONICAL: Record<string, UserRole> = {
+  STUDENT: UserRole.PARTICIPANT,
+  PARTICIPANT: UserRole.PARTICIPANT,
+  FACULTY: UserRole.FACILITATOR,
+  FACILITATOR: UserRole.FACILITATOR,
+  ADMIN: UserRole.ADMINISTRATOR,
+  ADMINISTRATOR: UserRole.ADMINISTRATOR,
+};
+
+/** Canonical form of a role, for comparisons. */
+export function canonicalRole(role?: string | null): UserRole | null {
+  if (!role) return null;
+  return ROLE_CANONICAL[role.toString().trim().toUpperCase()] ?? null;
+}
+
+/** Every stored spelling of a role, for `$in` queries against mixed data. */
+export function roleVariants(role: string): UserRole[] {
+  const canon = canonicalRole(role);
+  if (!canon) return [];
+  return (Object.keys(ROLE_CANONICAL) as string[])
+    .filter((k) => ROLE_CANONICAL[k] === canon)
+    .map((k) => k as UserRole);
 }
 
 export enum EnrollmentStatus {
