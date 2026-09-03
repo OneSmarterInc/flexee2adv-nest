@@ -173,10 +173,10 @@ async function sendEmailViaMailjet(
 }
 
 /* -------------------------------------------
-   STUDENT SIMULATION INVITE EMAIL
+   PARTICIPANT SIMULATION INVITE EMAIL
 -------------------------------------------- */
 
-export async function sendStudentInviteEmail(
+export async function sendParticipantInviteEmail(
   email: string,
   simulationName: string,
   inviteLink: string,
@@ -184,7 +184,7 @@ export async function sendStudentInviteEmail(
   options?: {
     firmName?: string;       // Pre-assigned firm name, if any
     firmNumber?: number;     // Pre-assigned firm number, if any
-    invitedByName?: string;  // Faculty member who sent the invite
+    invitedByName?: string;  // Facilitator member who sent the invite
     expiresAt?: Date;        // Invite expiry — drives the deadline copy
   }
 ): Promise<boolean> {
@@ -394,7 +394,7 @@ export async function sendStudentInviteEmail(
 
 export async function sendQuarterDeadlineEmail(
   email: string,
-  studentName: string,
+  participantName: string,
   simulationName: string,
   firmName: string,
   quarter: number,
@@ -430,7 +430,7 @@ export async function sendQuarterDeadlineEmail(
     <p style="font-size:14px;line-height:1.65;color:${BRAND.textMuted};
               margin:0 0 28px;text-align:center;
               font-family:'Inter',Arial,sans-serif;">
-      ${studentName ? studentName + ', your' : 'Your'} firm
+      ${participantName ? participantName + ', your' : 'Your'} firm
       <strong style="color:${BRAND.textPrimary};">${firmName}</strong>
       in <strong style="color:${BRAND.textPrimary};">${simulationName}</strong>
       hasn't submitted decisions for this quarter yet.
@@ -479,7 +479,7 @@ export async function sendQuarterDeadlineEmail(
 
   return sendEmailViaMailjet(
     email,
-    studentName || email,
+    participantName || email,
     `${urgent ? '⚠ ' : ''}Q${quarter} closes soon — ${simulationName}`,
     emailWrapper(content)
   );
@@ -488,12 +488,12 @@ export async function sendQuarterDeadlineEmail(
 /* -------------------------------------------
    MODULE UNLOCK NOTIFICATION EMAIL
    Optional — fires when a scheduled module opens
-   for the cohort. Sent to all enrolled students.
+   for the cohort. Sent to all enrolled participants.
 -------------------------------------------- */
 
 export async function sendModuleUnlockedEmail(
   email: string,
-  studentName: string,
+  participantName: string,
   simulationName: string,
   moduleLabel: string,
   moduleDescription: string,
@@ -560,7 +560,7 @@ export async function sendModuleUnlockedEmail(
 
   return sendEmailViaMailjet(
     email,
-    studentName || email,
+    participantName || email,
     `${moduleLabel} unlocked — ${simulationName}`,
     emailWrapper(content)
   );

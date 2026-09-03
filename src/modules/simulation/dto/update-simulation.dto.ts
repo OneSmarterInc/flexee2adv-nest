@@ -89,11 +89,11 @@ export class UpdateSimulationDto {
   @Max(0.2)
   demandVariability?: number;
 
-  @ApiPropertyOptional({ description: 'Faculty IDs to assign' })
+  @ApiPropertyOptional({ description: 'Facilitator IDs to assign' })
   @IsOptional()
   @IsArray()
   @IsMongoId({ each: true })
-  facultyIds?: string[];
+  facilitatorIds?: string[];
 
   @ApiPropertyOptional({ description: 'Is simulation archived' })
   @IsOptional()

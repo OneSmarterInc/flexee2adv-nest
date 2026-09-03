@@ -1,5 +1,4 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { canonicalRole } from '../../../entities/index.entity';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@/entities/index.entity';
 
@@ -27,11 +26,7 @@ export class RolesGuard implements CanActivate {
     }
 
     // Check if user's role is in the required roles
-    // Compare canonically so STUDENT/PARTICIPANT, FACULTY/FACILITATOR and
-    // ADMIN/ADMINISTRATOR are the same role regardless of which spelling the
-    // user record happens to carry.
-    const userCanon = canonicalRole(user.role);
-    const hasRole = requiredRoles.some((r) => canonicalRole(r) === userCanon);
+    const hasRole = requiredRoles.includes(user.role);
     
     if (!hasRole) {
       throw new ForbiddenException(

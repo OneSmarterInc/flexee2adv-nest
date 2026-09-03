@@ -55,7 +55,7 @@ export class UpdateFeaturesDto {
   @IsBoolean()
   transportLogistics?: boolean;
 
-  // Advanced modules (default OFF - faculty toggles)
+  // Advanced modules (default OFF - facilitator toggles)
   @ApiPropertyOptional({ description: 'Enable capacity expansion module', default: false })
   @IsOptional()
   @IsBoolean()

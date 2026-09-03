@@ -177,7 +177,7 @@ export class FirmConfigDto {
 }
 
 // ─── Rich-shape ModuleSchedule ──────────────────────────────────────────────
-// One entry per advanced module. Faculty sends an array of these at create
+// One entry per advanced module. Facilitator sends an array of these at create
 // time; each entry says when the module unlocks and whether it's enabled.
 export class AdvancedModuleConfigDto {
   @ApiProperty({ enum: ADVANCED_MODULE_IDS, description: 'Module identifier' })
@@ -335,11 +335,11 @@ export class CreateSimulationDto {
   @Max(0.2)
   demandVariability?: number;
 
-  @ApiPropertyOptional({ description: 'Faculty IDs to assign' })
+  @ApiPropertyOptional({ description: 'Facilitator IDs to assign' })
   @IsOptional()
   @IsArray()
   @IsMongoId({ each: true })
-  facultyIds?: string[];
+  facilitatorIds?: string[];
 
   @ApiPropertyOptional({ description: 'Custom firm configurations' })
   @IsOptional()

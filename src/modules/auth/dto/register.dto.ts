@@ -35,12 +35,12 @@ export class RegisterDto {
 
   @ApiProperty({ 
     example: 'STU001',
-    description: 'Student ID (optional)',
+    description: 'Participant ID (optional)',
     required: false 
   })
   @IsOptional()
   @IsString()
-  studentId?: string;
+  participantId?: string;
 
   @ApiProperty({ 
     example: 'MIT',

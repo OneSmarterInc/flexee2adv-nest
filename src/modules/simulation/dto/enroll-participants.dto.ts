@@ -1,4 +1,4 @@
-// src/simulation/dto/enroll-students.dto.ts
+// src/simulation/dto/enroll-participants.dto.ts
 import {
   IsString,
   IsOptional,
@@ -21,10 +21,10 @@ export enum EnrollmentRole {
   OBSERVER = 'OBSERVER',
 }
 
-export class StudentEnrollmentDto {
-  @ApiProperty({ description: 'Student user ID' })
+export class ParticipantEnrollmentDto {
+  @ApiProperty({ description: 'Participant user ID' })
   @IsMongoId()
-  studentId: string;
+  participantId: string;
 
   @ApiPropertyOptional({ enum: EnrollmentRole, default: EnrollmentRole.TEAM_MEMBER })
   @IsOptional()
@@ -32,34 +32,34 @@ export class StudentEnrollmentDto {
   role?: EnrollmentRole;
 }
 
-export class EnrollStudentsDto {
-  @ApiProperty({ description: 'Firm ID to enroll students in' })
+export class EnrollParticipantsDto {
+  @ApiProperty({ description: 'Firm ID to enroll participants in' })
   @IsMongoId()
   firmId: string;
 
-  @ApiProperty({ description: 'List of students to enroll', type: [StudentEnrollmentDto] })
+  @ApiProperty({ description: 'List of participants to enroll', type: [ParticipantEnrollmentDto] })
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => StudentEnrollmentDto)
-  students: StudentEnrollmentDto[];
+  @Type(() => ParticipantEnrollmentDto)
+  participants: ParticipantEnrollmentDto[];
 
   @ApiPropertyOptional({ description: 'Team name for this group' })
   @IsOptional()
   @IsString()
   teamName?: string;
 
-  @ApiPropertyOptional({ default: true, description: 'Can students submit decisions' })
+  @ApiPropertyOptional({ default: true, description: 'Can participants submit decisions' })
   @IsOptional()
   @IsBoolean()
   canSubmitDecisions?: boolean;
 
-  @ApiPropertyOptional({ default: true, description: 'Can students view reports' })
+  @ApiPropertyOptional({ default: true, description: 'Can participants view reports' })
   @IsOptional()
   @IsBoolean()
   canViewReports?: boolean;
 
-  @ApiPropertyOptional({ default: false, description: 'Can students view competitor data' })
+  @ApiPropertyOptional({ default: false, description: 'Can participants view competitor data' })
   @IsOptional()
   @IsBoolean()
   canViewCompetitorData?: boolean;
@@ -86,10 +86,10 @@ export class FirmEnrollmentDto {
   @IsString()
   teamName?: string;
 
-  @ApiProperty({ description: 'Student emails to enroll' })
+  @ApiProperty({ description: 'Participant emails to enroll' })
   @IsArray()
   @IsString({ each: true })
-  studentEmails: string[];
+  participantEmails: string[];
 }
 
 // Response DTOs

@@ -77,7 +77,7 @@ export enum EventEffect {
 
 export enum EventSource {
   RANDOM = 'RANDOM',
-  FACULTY_TRIGGERED = 'FACULTY_TRIGGERED',
+  FACILITATOR_TRIGGERED = 'FACILITATOR_TRIGGERED',
   SCENARIO = 'SCENARIO',
 }
 
@@ -93,43 +93,11 @@ export enum ScMaturityLevel {
 }
 
 export enum UserRole {
-  STUDENT = 'STUDENT',
-  FACULTY = 'FACULTY',
-  ADMIN = 'ADMIN',
-  // The product was renamed and user records are already being written with
-  // the new vocabulary. Both spellings are valid values so that a save() on an
-  // existing document cannot fail schema validation - which is exactly what
-  // broke login for every renamed user (auth.service updates lastLoginAt and
-  // saves, and Mongoose validates the whole document).
   PARTICIPANT = 'PARTICIPANT',
   FACILITATOR = 'FACILITATOR',
   ADMINISTRATOR = 'ADMINISTRATOR',
 }
 
-/** Old and new spellings collapse to one canonical role. */
-const ROLE_CANONICAL: Record<string, UserRole> = {
-  STUDENT: UserRole.PARTICIPANT,
-  PARTICIPANT: UserRole.PARTICIPANT,
-  FACULTY: UserRole.FACILITATOR,
-  FACILITATOR: UserRole.FACILITATOR,
-  ADMIN: UserRole.ADMINISTRATOR,
-  ADMINISTRATOR: UserRole.ADMINISTRATOR,
-};
-
-/** Canonical form of a role, for comparisons. */
-export function canonicalRole(role?: string | null): UserRole | null {
-  if (!role) return null;
-  return ROLE_CANONICAL[role.toString().trim().toUpperCase()] ?? null;
-}
-
-/** Every stored spelling of a role, for `$in` queries against mixed data. */
-export function roleVariants(role: string): UserRole[] {
-  const canon = canonicalRole(role);
-  if (!canon) return [];
-  return (Object.keys(ROLE_CANONICAL) as string[])
-    .filter((k) => ROLE_CANONICAL[k] === canon)
-    .map((k) => k as UserRole);
-}
 
 export enum EnrollmentStatus {
   PENDING_FIRM_ASSIGNMENT = 'PENDING_FIRM_ASSIGNMENT',
@@ -427,7 +395,7 @@ export class CostBreakdown {
   @Prop({ default: 0 })
   interest: number;
 
-  // VMI — split so faculty can show students setup is one-time capital
+  // VMI — split so facilitator can show participants setup is one-time capital
   // while ongoing is recurring opex
   @Prop({ default: 0 })
   vmiSetup: number;
@@ -481,7 +449,7 @@ export class Simulation {
   @Prop({ type: FeatureToggles, default: () => ({}) })
   features: FeatureToggles;
 
-  // Scheduled module activation by quarter (faculty sets at creation time)
+  // Scheduled module activation by quarter (facilitator sets at creation time)
   @Prop({ type: ModuleSchedule, default: () => ({}) })
   moduleSchedule: ModuleSchedule;
 
@@ -514,7 +482,7 @@ export class Simulation {
   @Prop({ default: 0.05 })
   demandVariability: number;
 
-  // Owner/Faculty
+  // Owner/Facilitator
   @Prop({ type: Types.ObjectId, ref: 'User' })
   owner?: Types.ObjectId;
 
@@ -525,7 +493,7 @@ export class Simulation {
   institutionName?: string;
 
   @Prop({ type: [Types.ObjectId], ref: 'User', default: [] })
-  facultyIds?: Types.ObjectId[];
+  facilitatorIds?: Types.ObjectId[];
 
   // UI Controls
   @Prop({ default: false })
@@ -1414,7 +1382,7 @@ export class EventImpact {
   @Prop({ enum: ['PARTS_DELAYED', 'DEMAND_SPIKE', 'STEAL_INPLAY', 'DEMAND_DROP', 'COST_INCREASE'], required: true })
   eventEffect: string;
 
-  @Prop({ enum: ['RANDOM', 'FACULTY_TRIGGERED', 'SCENARIO'], required: true })
+  @Prop({ enum: ['RANDOM', 'FACILITATOR_TRIGGERED', 'SCENARIO'], required: true })
   source: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
@@ -1460,7 +1428,7 @@ export const EventImpactSchema = SchemaFactory.createForClass(EventImpact);
 EventImpactSchema.index({ simulation: 1, quarter: 1 });
 EventImpactSchema.index({ event: 1 });
 EventImpactSchema.index({ firm: 1, quarter: -1 });
-EventImpactSchema.index({ source: 1, simulation: 1 }); // Faculty dashboard: "Show all faculty-triggered"
+EventImpactSchema.index({ source: 1, simulation: 1 }); // Facilitator dashboard: "Show all facilitator-triggered"
 EventImpactSchema.index({ triggeredBy: 1, simulation: 1 }); // "Show my triggered events"
 
 
@@ -1911,11 +1879,11 @@ export class User {
   @Prop({ select: false })
   passwordHash?: string;
 
-  @Prop({ enum: UserRole, default: UserRole.STUDENT })
+  @Prop({ enum: UserRole, default: UserRole.PARTICIPANT })
   role: UserRole;
 
   @Prop()
-  studentId?: string;
+  participantId?: string;
 
   @Prop()
   organization?: string;
@@ -2975,18 +2943,18 @@ export interface RegionalDCResult {
 }
 
 // ============================================================================
-// STUDENT ONBOARDING SCHEMA (DA Flow)
+// PARTICIPANT ONBOARDING SCHEMA (DA Flow)
 // ============================================================================
 
-export type StudentOnboardingDocument = StudentOnboarding & Document;
+export type ParticipantOnboardingDocument = ParticipantOnboarding & Document;
 
-@Schema({ timestamps: true, collection: 'student_onboardings' })
-export class StudentOnboarding {
+@Schema({ timestamps: true, collection: 'participant_onboardings' })
+export class ParticipantOnboarding {
   @Prop({ type: Types.ObjectId, ref: 'Simulation', required: true })
   simulation: Types.ObjectId;
 
-  // Optional firm assignment at invite time. Faculty can assign to a firm
-  // up front, or leave it null and have the student pick a firm at accept.
+  // Optional firm assignment at invite time. Facilitator can assign to a firm
+  // up front, or leave it null and have the participant pick a firm at accept.
   @Prop({ type: Types.ObjectId, ref: 'Firm', default: null })
   firm: Types.ObjectId | null;
 
@@ -2994,7 +2962,7 @@ export class StudentOnboarding {
   firmNumber: number | null;
 
   // Email is the invite key. A user record may not exist yet — that's the
-  // whole point of this flow. When the student accepts, we either link to
+  // whole point of this flow. When the participant accepts, we either link to
   // an existing User by email or create one.
   @Prop({ required: true, lowercase: true, trim: true })
   email: string;
@@ -3003,18 +2971,18 @@ export class StudentOnboarding {
   @Prop({ type: Types.ObjectId, ref: 'User', default: null })
   user: Types.ObjectId | null;
 
-  // Cryptographic invite token. Sent to student via email; required to accept.
+  // Cryptographic invite token. Sent to participant via email; required to accept.
   @Prop({ required: true, unique: true })
   inviteToken: string;
 
   @Prop({ enum: InviteStatus, default: InviteStatus.PENDING })
   status: InviteStatus;
 
-  // Faculty member who created the invite
+  // Facilitator member who created the invite
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   invitedBy: Types.ObjectId;
 
-  // Optional personal note from faculty included in the invite email
+  // Optional personal note from facilitator included in the invite email
   @Prop()
   inviteMessage?: string;
 
@@ -3036,7 +3004,7 @@ export class StudentOnboarding {
   emailSentAt?: Date;
 
   // Bulk import grouping — every row in a single CSV upload shares this ID
-  // so faculty can see "Spring 2026 cohort upload" as a single batch in
+  // so facilitator can see "Spring 2026 cohort upload" as a single batch in
   // the management UI. Null for one-off invites.
   @Prop()
   bulkImportId?: string;
@@ -3045,17 +3013,17 @@ export class StudentOnboarding {
   rowNumber?: number;
 }
 
-export const StudentOnboardingSchema =
-  SchemaFactory.createForClass(StudentOnboarding);
+export const ParticipantOnboardingSchema =
+  SchemaFactory.createForClass(ParticipantOnboarding);
 
-StudentOnboardingSchema.index(
+ParticipantOnboardingSchema.index(
   { simulation: 1, email: 1 },
   { unique: true },
 );
-StudentOnboardingSchema.index({ inviteToken: 1 }, { unique: true });
-StudentOnboardingSchema.index({ status: 1, expiresAt: 1 });
-StudentOnboardingSchema.index({ user: 1 });
-StudentOnboardingSchema.index({ bulkImportId: 1 });
+ParticipantOnboardingSchema.index({ inviteToken: 1 }, { unique: true });
+ParticipantOnboardingSchema.index({ status: 1, expiresAt: 1 });
+ParticipantOnboardingSchema.index({ user: 1 });
+ParticipantOnboardingSchema.index({ bulkImportId: 1 });
 
 /**
  * Result from processing Multi-Carrier Selection

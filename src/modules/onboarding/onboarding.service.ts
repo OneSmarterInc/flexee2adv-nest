@@ -7,13 +7,13 @@
 //      schema default or threw a validation error, leaving accepted invites
 //      with no enrollment record.
 //   2. Enrollment creation moved BEFORE the invite is marked accepted. If
-//      enrollment creation fails, the invite stays PENDING so the student
-//      and faculty can retry instead of being stuck in a "accepted but no
+//      enrollment creation fails, the invite stays PENDING so the participant
+//      and facilitator can retry instead of being stuck in a "accepted but no
 //      team" limbo.
 //   3. Added console.log lines around the enrollment write so you can see
 //      in the Nest dev console exactly what happened on each accept.
 //   4. Honour pre-assigned firms from the invite (invite.firm / invite.firmNumber).
-//      If faculty assigned a firm at invite time, enrollment becomes ACTIVE
+//      If facilitator assigned a firm at invite time, enrollment becomes ACTIVE
 //      with that firm attached. Otherwise PENDING_FIRM_ASSIGNMENT with null firm.
 
 import {
@@ -28,8 +28,8 @@ import { Model, Types } from 'mongoose';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import {
-  StudentOnboarding,
-  StudentOnboardingDocument,
+  ParticipantOnboarding,
+  ParticipantOnboardingDocument,
   InviteStatus,
   Simulation,
   SimulationDocument,
@@ -44,7 +44,7 @@ import {
   FirmDocument,
 } from '../../entities/index.entity';
 import {
-  InviteStudentDto,
+  InviteParticipantDto,
   BulkInviteDto,
   BulkInviteResponseDto,
   ExcelImportDto,
@@ -52,13 +52,13 @@ import {
   AcceptInviteDto,
   AcceptInviteResponseDto,
 } from './dto';
-import { sendStudentInviteEmail } from '../../utils/email.util';
+import { sendParticipantInviteEmail } from '../../utils/email.util';
 
 @Injectable()
 export class OnboardingService {
   constructor(
-    @InjectModel(StudentOnboarding.name)
-    private studentOnboardingModel: Model<StudentOnboardingDocument>,
+    @InjectModel(ParticipantOnboarding.name)
+    private participantOnboardingModel: Model<ParticipantOnboardingDocument>,
     @InjectModel(Simulation.name)
     private simulationModel: Model<SimulationDocument>,
     @InjectModel(User.name)
@@ -70,11 +70,11 @@ export class OnboardingService {
   ) {}
 
   /**
-   * Send single invite to a student
+   * Send single invite to a participant
    */
-  async inviteStudent(
-    dto: InviteStudentDto,
-    facultyUser: any,
+  async inviteParticipant(
+    dto: InviteParticipantDto,
+    facilitatorUser: any,
   ): Promise<any> {
     const simulation = await this.simulationModel.findById(dto.simulationId);
     if (!simulation) {
@@ -83,7 +83,7 @@ export class OnboardingService {
 
     const email = dto.email.toLowerCase();
 
-    const existing = await this.studentOnboardingModel.findOne({
+    const existing = await this.participantOnboardingModel.findOne({
       simulation: dto.simulationId,
       email,
     });
@@ -91,7 +91,7 @@ export class OnboardingService {
     if (existing) {
       if (existing.status === InviteStatus.ACCEPTED) {
         throw new ConflictException(
-          'Student is already enrolled in this simulation',
+          'Participant is already enrolled in this simulation',
         );
       }
 
@@ -102,12 +102,12 @@ export class OnboardingService {
           status: existing.status,
           inviteToken: existing.inviteToken,
           expiresAt: existing.expiresAt,
-          message: 'Invite already sent to this student',
+          message: 'Invite already sent to this participant',
         };
       }
 
       const inviteToken = this.generateInviteToken();
-      const updatedInvite = await this.studentOnboardingModel.findByIdAndUpdate(
+      const updatedInvite = await this.participantOnboardingModel.findByIdAndUpdate(
         existing._id,
         {
           inviteToken,
@@ -146,12 +146,12 @@ export class OnboardingService {
 
     const inviteToken = this.generateInviteToken();
 
-    const invite = await this.studentOnboardingModel.create({
+    const invite = await this.participantOnboardingModel.create({
       simulation: dto.simulationId,
       email,
       inviteToken,
       status: InviteStatus.PENDING,
-      invitedBy: facultyUser._id,
+      invitedBy: facilitatorUser._id,
       inviteMessage: dto.inviteMessage,
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     });
@@ -174,11 +174,11 @@ export class OnboardingService {
   }
 
   /**
-   * Send bulk invites to multiple students
+   * Send bulk invites to multiple participants
    */
-  async bulkInviteStudents(
+  async bulkInviteParticipants(
     dto: BulkInviteDto,
-    facultyUser: any,
+    facilitatorUser: any,
   ): Promise<BulkInviteResponseDto> {
     const simulation = await this.simulationModel.findById(dto.simulationId);
     if (!simulation) {
@@ -192,7 +192,7 @@ export class OnboardingService {
       const normalizedEmail = email.toLowerCase();
 
       try {
-        const existing = await this.studentOnboardingModel.findOne({
+        const existing = await this.participantOnboardingModel.findOne({
           simulation: dto.simulationId,
           email: normalizedEmail,
         });
@@ -216,7 +216,7 @@ export class OnboardingService {
 
           const inviteToken = this.generateInviteToken();
           const updatedInvite =
-            await this.studentOnboardingModel.findByIdAndUpdate(
+            await this.participantOnboardingModel.findByIdAndUpdate(
               existing._id,
               {
                 inviteToken,
@@ -256,12 +256,12 @@ export class OnboardingService {
 
         const inviteToken = this.generateInviteToken();
 
-        const invite = await this.studentOnboardingModel.create({
+        const invite = await this.participantOnboardingModel.create({
           simulation: dto.simulationId,
           email: normalizedEmail,
           inviteToken,
           status: InviteStatus.PENDING,
-          invitedBy: facultyUser._id,
+          invitedBy: facilitatorUser._id,
           inviteMessage: dto.inviteMessage,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         });
@@ -306,12 +306,12 @@ export class OnboardingService {
   }
 
   /**
-   * Process Excel file for bulk student invites
+   * Process Excel file for bulk participant invites
    */
   async importFromExcel(
     file: any,
     dto: ExcelImportDto,
-    facultyUser: any,
+    facilitatorUser: any,
   ): Promise<ExcelImportResponseDto> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
@@ -339,7 +339,7 @@ export class OnboardingService {
       const rowNumber = i + 2;
 
       try {
-        let email = row.email || row.Email || row.EMAIL || row.studentEmail;
+        let email = row.email || row.Email || row.EMAIL || row.participantEmail;
 
         if (!email) {
           throw new Error('Email column not found in Excel row');
@@ -351,7 +351,7 @@ export class OnboardingService {
           throw new Error('Invalid email format');
         }
 
-        const existing = await this.studentOnboardingModel.findOne({
+        const existing = await this.participantOnboardingModel.findOne({
           simulation: dto.simulationId,
           email,
         });
@@ -377,7 +377,7 @@ export class OnboardingService {
 
           const inviteToken = this.generateInviteToken();
           const updatedInvite =
-            await this.studentOnboardingModel.findByIdAndUpdate(
+            await this.participantOnboardingModel.findByIdAndUpdate(
               existing._id,
               {
                 inviteToken,
@@ -416,12 +416,12 @@ export class OnboardingService {
 
         const inviteToken = this.generateInviteToken();
 
-        const invite = await this.studentOnboardingModel.create({
+        const invite = await this.participantOnboardingModel.create({
           simulation: dto.simulationId,
           email,
           inviteToken,
           status: InviteStatus.PENDING,
-          invitedBy: facultyUser._id,
+          invitedBy: facilitatorUser._id,
           inviteMessage: dto.inviteMessage,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           bulkImportId,
@@ -480,7 +480,7 @@ export class OnboardingService {
     console.log(`[acceptInvite] start token=${dto.inviteToken?.slice(0, 12)}...`);
 
     // ─── 1. Find a valid invite ───────────────────────────────────────────
-    const invite = await this.studentOnboardingModel.findOne({
+    const invite = await this.participantOnboardingModel.findOne({
       inviteToken: dto.inviteToken,
       status: InviteStatus.PENDING,
       expiresAt: { $gt: new Date() },
@@ -501,7 +501,7 @@ export class OnboardingService {
     if (!user) {
       if (!dto.password) {
         throw new BadRequestException(
-          'Password is required for new student accounts',
+          'Password is required for new participant accounts',
         );
       }
 
@@ -518,7 +518,7 @@ export class OnboardingService {
         firstName,
         lastName,
         displayName,
-        role: UserRole.STUDENT,
+        role: UserRole.PARTICIPANT,
         passwordHash,
         isActive: true,
       });
@@ -619,7 +619,7 @@ export class OnboardingService {
       success: true,
       message: firmId
         ? 'Successfully joined simulation and placed in firm.'
-        : 'Successfully joined simulation. Awaiting firm assignment from faculty.',
+        : 'Successfully joined simulation. Awaiting firm assignment from facilitator.',
       simulation: {
         id: (simulation._id as Types.ObjectId).toString(),
         name: simulation.name,
@@ -637,7 +637,7 @@ export class OnboardingService {
    * Get invite details by token
    */
   async getInviteDetails(inviteToken: string): Promise<any> {
-    const invite = await this.studentOnboardingModel.findOne({
+    const invite = await this.participantOnboardingModel.findOne({
       inviteToken,
     });
 
@@ -681,13 +681,13 @@ export class OnboardingService {
   /**
    * Get all pending invites for a simulation
    */
-  async getSimulationInvites(simulationId: string, facultyUser: any): Promise<any[]> {
+  async getSimulationInvites(simulationId: string, facilitatorUser: any): Promise<any[]> {
     const simulation = await this.simulationModel.findById(simulationId);
     if (!simulation) {
       throw new NotFoundException('Simulation not found');
     }
 
-    const invites = await this.studentOnboardingModel
+    const invites = await this.participantOnboardingModel
       .find({
         simulation: simulationId,
       })
@@ -708,8 +708,8 @@ export class OnboardingService {
   /**
    * Resend invite email
    */
-  async resendInvite(inviteId: string, facultyUser: any): Promise<any> {
-    const invite = await this.studentOnboardingModel.findById(inviteId);
+  async resendInvite(inviteId: string, facilitatorUser: any): Promise<any> {
+    const invite = await this.participantOnboardingModel.findById(inviteId);
 
     if (!invite) {
       throw new NotFoundException('Invite not found');
@@ -751,19 +751,19 @@ export class OnboardingService {
   generateExcelTemplate(): Buffer {
     const sampleData = [
       {
-        Email: 'student1@university.edu',
+        Email: 'participant1@university.edu',
         'First Name': 'John',
         'Last Name': 'Doe',
         Notes: 'Optional notes',
       },
       {
-        Email: 'student2@university.edu',
+        Email: 'participant2@university.edu',
         'First Name': 'Jane',
         'Last Name': 'Smith',
         Notes: 'Optional notes',
       },
       {
-        Email: 'student3@university.edu',
+        Email: 'participant3@university.edu',
         'First Name': 'Bob',
         'Last Name': 'Johnson',
         Notes: 'Optional notes',
@@ -772,7 +772,7 @@ export class OnboardingService {
 
     const worksheet = XLSX.utils.json_to_sheet(sampleData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Students');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Participants');
 
     worksheet['!cols'] = [
       { wch: 30 },
@@ -791,7 +791,7 @@ export class OnboardingService {
   async getOnboardingRecords(
     simulationId: string,
     status?: string,
-    facultyUser?: any,
+    facilitatorUser?: any,
   ): Promise<any[]> {
     const simulation = await this.simulationModel.findById(simulationId);
     if (!simulation) {
@@ -803,7 +803,7 @@ export class OnboardingService {
       query.status = status;
     }
 
-    const invites = await this.studentOnboardingModel
+    const invites = await this.participantOnboardingModel
       .find(query)
       .sort({ createdAt: -1 });
 
@@ -862,7 +862,7 @@ export class OnboardingService {
   async assignFirmToEnrollment(
     enrollmentId: string,
     firmNumber: number,
-    facultyUser: any,
+    facilitatorUser: any,
   ): Promise<any> {
     const enrollment = await this.enrollmentModel.findById(enrollmentId);
     if (!enrollment) {
@@ -937,7 +937,7 @@ export class OnboardingService {
     const inviteLink = `${process.env.FRONTEND_URL}/onboarding/accept?token=${inviteToken}`;
 
     try {
-      await sendStudentInviteEmail(
+      await sendParticipantInviteEmail(
         email,
         simulation.name,
         inviteLink,

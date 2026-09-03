@@ -35,6 +35,6 @@ export class TriggerEventDto {
   @Max(4)
   duration?: number;
 
-  // REMOVED: affectedFirms - GAS behavior applies faculty-triggered events to all firms equally
+  // REMOVED: affectedFirms - GAS behavior applies facilitator-triggered events to all firms equally
   // This prevents accidental per-firm targeting and ensures fair learning conditions
 }

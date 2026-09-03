@@ -10,7 +10,7 @@ export interface SeedUser {
   firstName: string;
   lastName: string;
   displayName?: string;
-  studentId?: string;
+  participantId?: string;
   organization?: string;
   role: UserRole;
 }
@@ -23,108 +23,108 @@ export class UserSeeder {
     console.log('🌱 Starting user seeding...');
     
     const seedUsers: SeedUser[] = [
-      // Admin users
+      // Administrator users
       {
-        email: 'admin@flexee.com',
-        password: 'Admin@123456',
-        firstName: 'Admin',
+        email: 'administrator@flexee.com',
+        password: 'Administrator@123456',
+        firstName: 'Administrator',
         lastName: 'User',
-        displayName: 'Admin User',
-        role: UserRole.ADMIN,
+        displayName: 'Administrator User',
+        role: UserRole.ADMINISTRATOR,
         organization: 'Flexee',
       },
       {
-        email: 'admin2@flexee.com',
-        password: 'Admin@123456',
-        firstName: 'Admin',
+        email: 'administrator2@flexee.com',
+        password: 'Administrator@123456',
+        firstName: 'Administrator',
         lastName: 'User 2',
-        displayName: 'Admin User 2',
-        role: UserRole.ADMIN,
+        displayName: 'Administrator User 2',
+        role: UserRole.ADMINISTRATOR,
         organization: 'Flexee',
       },
 
-      // Faculty users
+      // Facilitator users
       {
-        email: 'faculty1@flexee.com',
-        password: 'Faculty@123456',
+        email: 'facilitator1@flexee.com',
+        password: 'Facilitator@123456',
         firstName: 'John',
         lastName: 'Smith',
         displayName: 'Dr. John Smith',
-        role: UserRole.FACULTY,
+        role: UserRole.FACILITATOR,
         organization: 'MIT',
       },
       {
-        email: 'faculty2@flexee.com',
-        password: 'Faculty@123456',
+        email: 'facilitator2@flexee.com',
+        password: 'Facilitator@123456',
         firstName: 'Sarah',
         lastName: 'Johnson',
         displayName: 'Dr. Sarah Johnson',
-        role: UserRole.FACULTY,
+        role: UserRole.FACILITATOR,
         organization: 'Stanford',
       },
       {
-        email: 'faculty3@flexee.com',
-        password: 'Faculty@123456',
+        email: 'facilitator3@flexee.com',
+        password: 'Facilitator@123456',
         firstName: 'Michael',
         lastName: 'Brown',
         displayName: 'Prof. Michael Brown',
-        role: UserRole.FACULTY,
+        role: UserRole.FACILITATOR,
         organization: 'Harvard',
       },
 
-      // Student users
+      // Participant users
       {
-        email: 'student1@flexee.com',
-        password: 'Student@123456',
+        email: 'participant1@flexee.com',
+        password: 'Participant@123456',
         firstName: 'Alice',
         lastName: 'Johnson',
-        studentId: 'STU001',
-        role: UserRole.STUDENT,
+        participantId: 'STU001',
+        role: UserRole.PARTICIPANT,
         organization: 'MIT',
       },
       {
-        email: 'student2@flexee.com',
-        password: 'Student@123456',
+        email: 'participant2@flexee.com',
+        password: 'Participant@123456',
         firstName: 'Bob',
         lastName: 'Smith',
-        studentId: 'STU002',
-        role: UserRole.STUDENT,
+        participantId: 'STU002',
+        role: UserRole.PARTICIPANT,
         organization: 'MIT',
       },
       {
-        email: 'student3@flexee.com',
-        password: 'Student@123456',
+        email: 'participant3@flexee.com',
+        password: 'Participant@123456',
         firstName: 'Charlie',
         lastName: 'Davis',
-        studentId: 'STU003',
-        role: UserRole.STUDENT,
+        participantId: 'STU003',
+        role: UserRole.PARTICIPANT,
         organization: 'Stanford',
       },
       {
-        email: 'student4@flexee.com',
-        password: 'Student@123456',
+        email: 'participant4@flexee.com',
+        password: 'Participant@123456',
         firstName: 'Diana',
         lastName: 'Williams',
-        studentId: 'STU004',
-        role: UserRole.STUDENT,
+        participantId: 'STU004',
+        role: UserRole.PARTICIPANT,
         organization: 'Stanford',
       },
       {
-        email: 'student5@flexee.com',
-        password: 'Student@123456',
+        email: 'participant5@flexee.com',
+        password: 'Participant@123456',
         firstName: 'Eve',
         lastName: 'Martinez',
-        studentId: 'STU005',
-        role: UserRole.STUDENT,
+        participantId: 'STU005',
+        role: UserRole.PARTICIPANT,
         organization: 'Harvard',
       },
       {
-        email: 'student6@flexee.com',
-        password: 'Student@123456',
+        email: 'participant6@flexee.com',
+        password: 'Participant@123456',
         firstName: 'Frank',
         lastName: 'Wilson',
-        studentId: 'STU006',
-        role: UserRole.STUDENT,
+        participantId: 'STU006',
+        role: UserRole.PARTICIPANT,
         organization: 'Harvard',
       },
     ];
@@ -156,7 +156,7 @@ export class UserSeeder {
           displayName: seedUser.displayName || `${seedUser.firstName} ${seedUser.lastName}`,
           passwordHash: hashedPassword,
           role: seedUser.role,
-          studentId: seedUser.studentId || undefined,
+          participantId: seedUser.participantId || undefined,
           organization: seedUser.organization || undefined,
           isActive: true,
         };

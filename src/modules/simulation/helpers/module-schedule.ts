@@ -7,7 +7,7 @@
 // What's here:
 //   buildAllOpenDefault   — every module enabled, all unlock at Q4
 //   buildAllOffDefault    — every module disabled
-//   buildScheduleFromDto  — construct a schedule from faculty input
+//   buildScheduleFromDto  — construct a schedule from facilitator input
 //   mergeScheduleUpdate   — merge a partial update into existing schedule
 //   syncFeaturesFromSchedule — flip FeatureToggles for modules past their unlock
 //   getScheduleStatus     — derive OPEN/SCHEDULED/LOCKED per module for the UI
@@ -40,7 +40,7 @@ const FIRST_DECISION_QUARTER = 4;
 
 /**
  * Every module enabled, all unlocking at Q4 (first decision quarter).
- * Used when faculty creates a sim without specifying any schedule.
+ * Used when facilitator creates a sim without specifying any schedule.
  */
 export function buildAllOpenDefault(): ModuleSchedule {
   return {
@@ -56,7 +56,7 @@ export function buildAllOpenDefault(): ModuleSchedule {
 
 /**
  * Every module disabled. Useful for a "blank slate" template where
- * faculty wants to opt modules in one at a time.
+ * facilitator wants to opt modules in one at a time.
  */
 export function buildAllOffDefault(): ModuleSchedule {
   return {
@@ -71,7 +71,7 @@ export function buildAllOffDefault(): ModuleSchedule {
 }
 
 /**
- * Build a schedule from faculty input. Any module not mentioned in the DTO
+ * Build a schedule from facilitator input. Any module not mentioned in the DTO
  * gets the all-open default (enabled, unlocks at Q4). Unknown moduleIds in
  * the DTO are dropped. Mode defaults to CUSTOM if the DTO doesn't say.
  */

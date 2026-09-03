@@ -1,4 +1,4 @@
-import { User, UserDocument, UserRole, roleVariants } from '../../entities/index.entity';
+import { User, UserDocument, UserRole } from '../../entities/index.entity';
 import {
   Injectable,
   BadRequestException,
@@ -40,21 +40,21 @@ export class UsersService {
   }
 
   /**
-   * Get all faculty users
+   * Get all facilitator users
    */
-  async findFacultyUsers(): Promise<User[]> {
+  async findFacilitators(): Promise<User[]> {
     return this.userModel
-      .find({ role: { $in: roleVariants(UserRole.FACULTY) }, isActive: true })
+      .find({ role: UserRole.FACILITATOR, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .exec();
   }
 
   /**
-   * Get all student users
+   * Get all participant users
    */
-  async findStudentUsers(): Promise<User[]> {
+  async findParticipants(): Promise<User[]> {
     return this.userModel
-      .find({ role: { $in: roleVariants(UserRole.STUDENT) }, isActive: true })
+      .find({ role: UserRole.PARTICIPANT, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .exec();
   }
@@ -62,9 +62,9 @@ export class UsersService {
   /**
    * Get all admin users
    */
-  async findAdminUsers(): Promise<User[]> {
+  async findAdministrators(): Promise<User[]> {
     return this.userModel
-      .find({ role: { $in: roleVariants(UserRole.ADMIN) }, isActive: true })
+      .find({ role: UserRole.ADMINISTRATOR, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .exec();
   }
@@ -83,13 +83,13 @@ export class UsersService {
   }
 
   /**
-   * Find user by student ID
+   * Find user by participant ID
    */
-  async findByStudentId(studentId: string): Promise<User | null> {
-    if (!studentId) {
-      throw new BadRequestException('Student ID is required');
+  async findByParticipantId(participantId: string): Promise<User | null> {
+    if (!participantId) {
+      throw new BadRequestException('Participant ID is required');
     }
-    return this.userModel.findOne({ studentId, isActive: true }).exec();
+    return this.userModel.findOne({ participantId, isActive: true }).exec();
   }
 
   /**
@@ -199,7 +199,7 @@ export class UsersService {
           { lastName: searchRegex },
           { displayName: searchRegex },
           { email: searchRegex },
-          { studentId: searchRegex },
+          { participantId: searchRegex },
         ],
         isActive: true,
       })
@@ -216,14 +216,14 @@ export class UsersService {
     limit: number = 10,
   ): Promise<{ users: User[]; total: number }> {
     const users = await this.userModel
-      .find({ role: { $in: roleVariants(role) }, isActive: true })
+      .find({ role, isActive: true })
       .sort({ lastName: 1, firstName: 1 })
       .skip(skip)
       .limit(limit)
       .exec();
 
     const total = await this.userModel.countDocuments({
-      role: { $in: roleVariants(role) },
+      role,
       isActive: true,
     });
 
@@ -235,26 +235,28 @@ export class UsersService {
    */
   async getUserStats(): Promise<{
     totalUsers: number;
-    admins: number;
-    faculty: number;
-    students: number;
+    administrators: number;
+    facilitators: number;
+    participants: number;
     activeUsers: number;
   }> {
     const totalUsers = await this.userModel.countDocuments();
-    const admins = await this.userModel.countDocuments({ role: { $in: roleVariants(UserRole.ADMIN) } });
-    const faculty = await this.userModel.countDocuments({
-      role: { $in: roleVariants(UserRole.FACULTY) },
+    const administrators = await this.userModel.countDocuments({
+      role: UserRole.ADMINISTRATOR,
     });
-    const students = await this.userModel.countDocuments({
-      role: { $in: roleVariants(UserRole.STUDENT) },
+    const facilitators = await this.userModel.countDocuments({
+      role: UserRole.FACILITATOR,
+    });
+    const participants = await this.userModel.countDocuments({
+      role: UserRole.PARTICIPANT,
     });
     const activeUsers = await this.userModel.countDocuments({ isActive: true });
 
     return {
       totalUsers,
-      admins,
-      faculty,
-      students,
+      administrators,
+      facilitators,
+      participants,
       activeUsers,
     };
   }

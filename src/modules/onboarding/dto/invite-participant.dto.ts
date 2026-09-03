@@ -7,12 +7,12 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class InviteStudentDto {
+export class InviteParticipantDto {
   @ApiProperty({ description: 'Simulation ID' })
   @IsMongoId()
   simulationId: string;
 
-  @ApiProperty({ description: 'Student email address' })
+  @ApiProperty({ description: 'Participant email address' })
   @IsEmail()
   email: string;
 
@@ -29,13 +29,13 @@ export class BulkInviteDto {
   simulationId: string;
 
   @ApiProperty({
-    description: 'List of student email addresses to invite',
-    example: ['student1@example.com', 'student2@example.com'],
+    description: 'List of participant email addresses to invite',
+    example: ['participant1@example.com', 'participant2@example.com'],
   })
   @IsString({ each: true })
   emails: string[];
 
-  @ApiPropertyOptional({ description: 'Custom invite message for all students' })
+  @ApiPropertyOptional({ description: 'Custom invite message for all participants' })
   @IsOptional()
   @IsString()
   @MaxLength(500)

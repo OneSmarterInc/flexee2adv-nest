@@ -965,7 +965,7 @@ export class DecisionService {
       // Defaults are market-scale, matching the "last demand" figure shown next
       // to each input (demand_history is market-wide). They used to be
       // firm-scale (80k/70k/50k), so the form prefilled one scale while the
-      // on-screen reference showed another - students forecast against
+      // on-screen reference showed another - participants forecast against
       // whichever they happened to read.
       forecastR1:     prev?.forecastR1     ?? 240000,
       forecastR2:     prev?.forecastR2     ?? 210000,

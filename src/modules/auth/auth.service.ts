@@ -35,14 +35,14 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new user (students by default)
+    // Create new user (participants by default)
     const newUser = new this.userModel({
       email: email.toLowerCase(),
       firstName,
       lastName,
       displayName: `${firstName} ${lastName}`,
       passwordHash: hashedPassword,
-      role: UserRole.STUDENT,
+      role: UserRole.PARTICIPANT,
       isActive: true,
     });
 

@@ -20,7 +20,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../../entities/index.entity';
 import { OnboardingService } from './onboarding.service';
 import {
-  InviteStudentDto,
+  InviteParticipantDto,
   BulkInviteDto,
   BulkInviteResponseDto,
   ExcelImportDto,
@@ -30,56 +30,56 @@ import {
 } from './dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
-@ApiTags('Student Onboarding')
+@ApiTags('Participant Onboarding')
 @Controller('onboarding')
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
 
   /**
-   * Send invite to single student
+   * Send invite to single participant
    */
   @Post('invite')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Invite a single student to a simulation' })
+  @ApiOperation({ summary: 'Invite a single participant to a simulation' })
   @ApiResponse({ status: 201, description: 'Invite sent successfully' })
-  async inviteStudent(
-    @Body() dto: InviteStudentDto,
-    @CurrentUser() facultyUser: any,
+  async inviteParticipant(
+    @Body() dto: InviteParticipantDto,
+    @CurrentUser() facilitatorUser: any,
   ) {
-    return this.onboardingService.inviteStudent(dto, facultyUser);
+    return this.onboardingService.inviteParticipant(dto, facilitatorUser);
   }
 
   /**
-   * Send bulk invites to multiple students
+   * Send bulk invites to multiple participants
    */
   @Post('bulk-invite')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Send invites to multiple students' })
+  @ApiOperation({ summary: 'Send invites to multiple participants' })
   @ApiResponse({
     status: 201,
     description: 'Bulk invites processed',
     type: BulkInviteResponseDto,
   })
-  async bulkInviteStudents(
+  async bulkInviteParticipants(
     @Body() dto: BulkInviteDto,
-    @CurrentUser() facultyUser: any,
+    @CurrentUser() facilitatorUser: any,
   ): Promise<BulkInviteResponseDto> {
-    return this.onboardingService.bulkInviteStudents(dto, facultyUser);
+    return this.onboardingService.bulkInviteParticipants(dto, facilitatorUser);
   }
 
   /**
-   * Import students from Excel file
+   * Import participants from Excel file
    */
   @Post('import-excel')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @UseInterceptors(FileInterceptor('file'))
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Bulk invite students from Excel file' })
+  @ApiOperation({ summary: 'Bulk invite participants from Excel file' })
   @ApiResponse({
     status: 201,
     description: 'Excel file processed',
@@ -88,7 +88,7 @@ export class OnboardingController {
   async importFromExcel(
     @UploadedFile() file: any,
     @Body() dto: ExcelImportDto,
-    @CurrentUser() facultyUser: any,
+    @CurrentUser() facilitatorUser: any,
   ): Promise<ExcelImportResponseDto> {
     if (!file || !file.mimetype.includes('sheet')) {
       throw new BadRequestException(
@@ -96,7 +96,7 @@ export class OnboardingController {
       );
     }
 
-    return this.onboardingService.importFromExcel(file, dto, facultyUser);
+    return this.onboardingService.importFromExcel(file, dto, facilitatorUser);
   }
 
   /**
@@ -130,17 +130,17 @@ export class OnboardingController {
    */
   @Get('simulation/:simulationId/invites')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Get all student invites for a simulation' })
+  @ApiOperation({ summary: 'Get all participant invites for a simulation' })
   @ApiResponse({ status: 200, description: 'List of invites' })
   async getSimulationInvites(
     @Param('simulationId') simulationId: string,
-    @CurrentUser() facultyUser: any,
+    @CurrentUser() facilitatorUser: any,
   ) {
     return this.onboardingService.getSimulationInvites(
       simulationId,
-      facultyUser,
+      facilitatorUser,
     );
   }
 
@@ -149,36 +149,36 @@ export class OnboardingController {
    */
   @Get('simulation/:simulationId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Get all onboarding records for a simulation with optional status filter' })
   @ApiResponse({ status: 200, description: 'List of onboarding records' })
   async getOnboardingRecords(
     @Param('simulationId') simulationId: string,
     @Query('status') status?: string,
-    @CurrentUser() facultyUser?: any,
+    @CurrentUser() facilitatorUser?: any,
   ) {
     return this.onboardingService.getOnboardingRecords(
       simulationId,
       status,
-      facultyUser,
+      facilitatorUser,
     );
   }
 
   /**
-   * Resend invite to student
+   * Resend invite to participant
    */
   @Post('resend/:inviteId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Resend invitation email to student' })
+  @ApiOperation({ summary: 'Resend invitation email to participant' })
   @ApiResponse({ status: 200, description: 'Invite resent successfully' })
   async resendInvite(
     @Param('inviteId') inviteId: string,
-    @CurrentUser() facultyUser: any,
+    @CurrentUser() facilitatorUser: any,
   ) {
-    return this.onboardingService.resendInvite(inviteId, facultyUser);
+    return this.onboardingService.resendInvite(inviteId, facilitatorUser);
   }
 
   /**
@@ -186,9 +186,9 @@ export class OnboardingController {
    */
   @Get('simulation/:simulationId/pending-assignment')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'List students who accepted but have no firm yet' })
+  @ApiOperation({ summary: 'List participants who accepted but have no firm yet' })
   @ApiResponse({ status: 200, description: 'Pending enrollments' })
   async getPendingFirmAssignment(
     @Param('simulationId') simulationId: string,
@@ -201,19 +201,19 @@ export class OnboardingController {
    */
   @Post('enrollment/:enrollmentId/assign-firm')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Assign a firm to a pending enrollment' })
   @ApiResponse({ status: 200, description: 'Firm assigned, enrollment activated' })
   async assignFirm(
     @Param('enrollmentId') enrollmentId: string,
     @Body() body: { firmNumber: number },
-    @CurrentUser() facultyUser: any,
+    @CurrentUser() facilitatorUser: any,
   ) {
     return this.onboardingService.assignFirmToEnrollment(
       enrollmentId,
       body.firmNumber,
-      facultyUser,
+      facilitatorUser,
     );
   }
 
@@ -222,10 +222,10 @@ export class OnboardingController {
    */
   @Get('download-template')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiBearerAuth('JWT')
   @ApiOperation({
-    summary: 'Download sample Excel template for bulk student import',
+    summary: 'Download sample Excel template for bulk participant import',
   })
   @ApiResponse({
     status: 200,
@@ -237,7 +237,7 @@ export class OnboardingController {
     res.set({
       'Content-Type':
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename="student-invites-template.xlsx"',
+      'Content-Disposition': 'attachment; filename="participant-invites-template.xlsx"',
       'Content-Length': buffer.length,
     });
 

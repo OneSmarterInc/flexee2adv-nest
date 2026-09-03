@@ -27,7 +27,7 @@ import {
 } from '@nestjs/swagger';
 import { CreateSimulationDto } from './dto/create-simulation.dto';
 import { UpdateSimulationDto } from './dto/update-simulation.dto';
-import { EnrollStudentsDto } from './dto/enroll-students.dto';
+import { EnrollParticipantsDto } from './dto/enroll-participants.dto';
 import { TriggerEventDto } from './dto/trigger-event.dto';
 import { UpdateFeaturesDto } from './dto/update-features.dto';
 import { QuarterDataVisibilityDto } from './dto/quarter-data-visibility.dto';
@@ -50,7 +50,7 @@ export class SimulationController {
   // ============================================================================
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a new simulation',
@@ -62,7 +62,7 @@ export class SimulationController {
     description: 'Simulation created and initialized to Q3',
   })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can create simulations',
+    description: 'Only admins and facilitator can create simulations',
   })
   async create(
     @Req() req: any,
@@ -75,7 +75,7 @@ export class SimulationController {
   @ApiOperation({
     summary: 'Get all simulations for current user',
     description:
-      'Admins see all, Faculty see owned/assigned, Students see enrolled.',
+      'Admins see all, Facilitator see owned/assigned, Participants see enrolled.',
   })
   @ApiResponse({
     status: 200,
@@ -85,26 +85,26 @@ export class SimulationController {
     return this.simulationService.findAllByUser(req.user._id);
   }
 
-  @Get('faculty/:facultyId')
-  @ApiOperation({ summary: 'Get simulations by faculty' })
-  @ApiParam({ name: 'facultyId', description: 'Faculty user ObjectId' })
+  @Get('facilitator/:facilitatorId')
+  @ApiOperation({ summary: 'Get simulations by facilitator' })
+  @ApiParam({ name: 'facilitatorId', description: 'Facilitator user ObjectId' })
   @ApiResponse({
     status: 200,
     description: 'Simulations retrieved successfully',
   })
-  async findByFaculty(@Param('facultyId') facultyId: string) {
-    return this.simulationService.findSimulationsByFaculty(facultyId);
+  async findByFacilitator(@Param('facilitatorId') facilitatorId: string) {
+    return this.simulationService.findSimulationsByFacilitator(facilitatorId);
   }
 
-  @Get('student/:studentId')
-  @ApiOperation({ summary: 'Get simulations by student enrollment' })
-  @ApiParam({ name: 'studentId', description: 'Student user ObjectId' })
+  @Get('participant/:participantId')
+  @ApiOperation({ summary: 'Get simulations by participant enrollment' })
+  @ApiParam({ name: 'participantId', description: 'Participant user ObjectId' })
   @ApiResponse({
     status: 200,
     description: 'Simulations retrieved successfully',
   })
-  async findByStudent(@Param('studentId') studentId: string) {
-    return this.simulationService.findSimulationsByStudent(studentId);
+  async findByParticipant(@Param('participantId') participantId: string) {
+    return this.simulationService.findSimulationsByParticipant(participantId);
   }
 
   @Get(':simulationId')
@@ -119,13 +119,13 @@ export class SimulationController {
   }
 
   @Patch(':simulationId')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update simulation settings or status' })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({ status: 200, description: 'Simulation updated successfully' })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can update simulations',
+    description: 'Only admins and facilitator can update simulations',
   })
   async update(
     @Param('simulationId') simulationId: string,
@@ -135,7 +135,7 @@ export class SimulationController {
   }
 
   @Delete(':simulationId')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMINISTRATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete simulation and all related data' })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
@@ -281,21 +281,21 @@ export class SimulationController {
   // ============================================================================
 
   @Post(':simulationId/firms/enroll')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Enroll students in a firm' })
+  @ApiOperation({ summary: 'Enroll participants in a firm' })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
-  @ApiResponse({ status: 201, description: 'Students enrolled successfully' })
+  @ApiResponse({ status: 201, description: 'Participants enrolled successfully' })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can enroll students',
+    description: 'Only admins and facilitator can enroll participants',
   })
-  async enrollStudents(
+  async enrollParticipants(
     @Param('simulationId') simulationId: string,
-    @Body() enrollStudentsDto: EnrollStudentsDto,
+    @Body() enrollParticipantsDto: EnrollParticipantsDto,
   ) {
-    return this.simulationService.enrollStudentsInFirm(
+    return this.simulationService.enrollParticipantsInFirm(
       simulationId,
-      enrollStudentsDto,
+      enrollParticipantsDto,
     );
   }
 
@@ -484,13 +484,13 @@ export class SimulationController {
   }
 
   @Post(':simulationId/events')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Trigger a simulation event' })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({ status: 201, description: 'Event triggered' })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can trigger events',
+    description: 'Only admins and facilitator can trigger events',
   })
   async triggerEvent(
     @Param('simulationId') simulationId: string,
@@ -509,7 +509,7 @@ export class SimulationController {
   // ============================================================================
 
   @Patch(':simulationId/features')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update feature toggles',
@@ -519,7 +519,7 @@ export class SimulationController {
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({ status: 200, description: 'Features updated' })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can update features',
+    description: 'Only admins and facilitator can update features',
   })
   async updateFeatures(
     @Param('simulationId') simulationId: string,
@@ -549,7 +549,7 @@ export class SimulationController {
   }
 
   @Patch(':simulationId/module-schedule')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update module activation schedule',
@@ -561,7 +561,7 @@ export class SimulationController {
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({ status: 200, description: 'Module schedule updated' })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can update the module schedule',
+    description: 'Only admins and facilitator can update the module schedule',
   })
   async updateModuleSchedule(
     @Param('simulationId') simulationId: string,
@@ -575,12 +575,12 @@ export class SimulationController {
   // ============================================================================
 
   @Patch(':simulationId/quarter-data-visibility')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Set quarter data visibility for UI',
     description:
-      'Controls whether quarter data should be displayed on the UI. Faculty can lock/unlock data visibility.',
+      'Controls whether quarter data should be displayed on the UI. Facilitator can lock/unlock data visibility.',
   })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({
@@ -588,7 +588,7 @@ export class SimulationController {
     description: 'Quarter data visibility updated',
   })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can update UI controls',
+    description: 'Only admins and facilitator can update UI controls',
   })
   async setShowQuarterData(
     @Param('simulationId') simulationId: string,
@@ -629,7 +629,7 @@ export class SimulationController {
   // Add this to simulation.controller.ts, in the QUARTER DATA & PROGRESSION section
 
   @Post(':simulationId/advance')
-  @Roles(UserRole.ADMIN, UserRole.FACULTY)
+  @Roles(UserRole.ADMINISTRATOR, UserRole.FACILITATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Advance simulation to next quarter',
@@ -639,25 +639,25 @@ export class SimulationController {
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({ status: 200, description: 'Quarter advanced successfully' })
   @ApiForbiddenResponse({
-    description: 'Only admins and faculty can advance quarters',
+    description: 'Only admins and facilitator can advance quarters',
   })
   async advanceQuarter(@Param('simulationId') simulationId: string) {
     return this.simulationService.advanceQuarter(simulationId);
   }
 
   // ============================================================================
-  // EVENT IMPACT TRACKING - Faculty Dashboard
+  // EVENT IMPACT TRACKING - Facilitator Dashboard
   // ============================================================================
 
   @Get(':simulationId/event-impacts')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiOperation({
     summary: 'Get all event impacts for simulation',
     description: 'Retrieve event impacts with optional filters for quarter, source, or triggered by',
   })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiQuery({ name: 'quarter', required: false, type: Number })
-  @ApiQuery({ name: 'source', required: false, type: String, enum: ['RANDOM', 'FACULTY_TRIGGERED', 'SCENARIO'] })
+  @ApiQuery({ name: 'source', required: false, type: String, enum: ['RANDOM', 'FACILITATOR_TRIGGERED', 'SCENARIO'] })
   @ApiQuery({ name: 'triggeredBy', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Event impacts retrieved' })
   async getEventImpacts(
@@ -673,20 +673,20 @@ export class SimulationController {
     });
   }
 
-  @Get(':simulationId/faculty-event-summary')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Get(':simulationId/facilitator-event-summary')
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiOperation({
-    summary: 'Get summary of faculty-triggered events',
-    description: 'Dashboard view showing aggregated impact of faculty-triggered events by quarter and type',
+    summary: 'Get summary of facilitator-triggered events',
+    description: 'Dashboard view showing aggregated impact of facilitator-triggered events by quarter and type',
   })
   @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
   @ApiResponse({ status: 200, description: 'Event summary retrieved' })
-  async getFacultyEventSummary(@Param('simulationId') simulationId: string) {
-    return this.simulationService.getFacultyEventSummary(simulationId);
+  async getFacilitatorEventSummary(@Param('simulationId') simulationId: string) {
+    return this.simulationService.getFacilitatorEventSummary(simulationId);
   }
 
   @Get('events/:eventId/impacts')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR)
   @ApiOperation({
     summary: 'Get detailed impacts of a specific event',
     description: 'View how a single event impacted each firm in the simulation',
@@ -702,7 +702,7 @@ export class SimulationController {
   // ============================================================================
 
   @Get(':simulationId/dc-status')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN, UserRole.STUDENT)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR, UserRole.PARTICIPANT)
   @ApiOperation({
     summary: 'Get DC status for all firms',
     description: 'Retrieve detailed distribution center inventory, utilization, and operational expenses for all firms',
@@ -721,7 +721,7 @@ export class SimulationController {
   }
 
   @Get(':simulationId/carrier-analysis')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN, UserRole.STUDENT)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR, UserRole.PARTICIPANT)
   @ApiOperation({
     summary: 'Get carrier selection and analysis for all firms',
     description: 'Retrieve carrier mode selection, costs, discounts, and on-time performance metrics for all firms',
@@ -744,7 +744,7 @@ export class SimulationController {
   // ============================================================================
 
   @Get(':simulationId/firms/:firmId/analytics-dashboard')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN, UserRole.STUDENT)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR, UserRole.PARTICIPANT)
   @ApiOperation({
     summary: 'Get analytics dashboard for a firm',
     description:
@@ -776,7 +776,7 @@ export class SimulationController {
   // ============================================================================
 
   @Get(':simulationId/balanced-scorecard')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN, UserRole.STUDENT)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR, UserRole.PARTICIPANT)
   @ApiOperation({
     summary: 'Get balanced scorecard for all firms',
     description:
@@ -805,7 +805,7 @@ export class SimulationController {
   // ============================================================================
 
   @Get(':simulationId/firms/:firmId/sop-dashboard')
-  @Roles(UserRole.FACULTY, UserRole.ADMIN, UserRole.STUDENT)
+  @Roles(UserRole.FACILITATOR, UserRole.ADMINISTRATOR, UserRole.PARTICIPANT)
   @ApiOperation({
     summary: 'Get Statement of Plans (SOP) dashboard for a firm',
     description:

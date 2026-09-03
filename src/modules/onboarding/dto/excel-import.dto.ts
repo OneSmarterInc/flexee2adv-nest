@@ -6,7 +6,7 @@ export class ExcelImportDto {
   @IsMongoId()
   simulationId: string;
 
-  @ApiPropertyOptional({ description: 'Custom invite message for all students' })
+  @ApiPropertyOptional({ description: 'Custom invite message for all participants' })
   @IsOptional()
   @IsString()
   inviteMessage?: string;
@@ -32,7 +32,7 @@ export class ExcelImportResponseDto {
   };
 }
 
-export interface ExcelStudent {
+export interface ExcelParticipant {
   email?: string;
   [key: string]: any;
 }

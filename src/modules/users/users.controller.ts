@@ -35,7 +35,7 @@ export class UsersController {
    * Get all active users (Admin only)
    */
   @Get()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMINISTRATOR)
   @ApiOperation({ summary: 'Get all active users (Admin only)' })
   @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
   async findAll(): Promise<User[]> {
@@ -43,74 +43,48 @@ export class UsersController {
   }
 
   /**
-   * Get all faculty users
+   * Get all participants
    */
-  @Get('faculty')
-  @ApiOperation({ summary: 'Get all faculty users' })
-  @ApiResponse({ status: 200, description: 'Faculty users retrieved successfully' })
-  async findFacultyUsers(): Promise<User[]> {
-    return this.usersService.findFacultyUsers();
-  }
-
-  /**
-   * Get all student users
-   */
-  @Get('students')
-  @ApiOperation({ summary: 'Get all student users' })
-  @ApiResponse({ status: 200, description: 'Student users retrieved successfully' })
-  async findStudentUsers(): Promise<User[]> {
-    return this.usersService.findStudentUsers();
-  }
-
-  /**
-   * Get all admin users (Admin only)
-   */
-  @Get('admins')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Get all admin users (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Admin users retrieved successfully' })
-  async findAdminUsers(): Promise<User[]> {
-    return this.usersService.findAdminUsers();
-  }
-
-  // The UI was renamed student/faculty/admin -> participant/facilitator/
-  // administrator. Roles are still persisted under the original names, so these
-  // aliases let the renamed client call the vocabulary it actually uses instead
-  // of 404ing. Same handlers, no duplicated logic.
   @Get('participants')
-  @ApiOperation({ summary: 'Get all participants (alias of /users/students)' })
+  @ApiOperation({ summary: 'Get all participants' })
   @ApiResponse({ status: 200, description: 'Participants retrieved successfully' })
   async findParticipants(): Promise<User[]> {
-    return this.usersService.findStudentUsers();
+    return this.usersService.findParticipants();
   }
 
+  /**
+   * Get all facilitators
+   */
   @Get('facilitators')
-  @ApiOperation({ summary: 'Get all facilitators (alias of /users/faculty)' })
+  @ApiOperation({ summary: 'Get all facilitators' })
   @ApiResponse({ status: 200, description: 'Facilitators retrieved successfully' })
   async findFacilitators(): Promise<User[]> {
-    return this.usersService.findFacultyUsers();
+    return this.usersService.findFacilitators();
   }
 
+  /**
+   * Get all administrators (Administrator only)
+   */
   @Get('administrators')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Get all administrators (alias of /users/admins)' })
+  @Roles(UserRole.ADMINISTRATOR)
+  @ApiOperation({ summary: 'Get all administrators (Administrator only)' })
   @ApiResponse({ status: 200, description: 'Administrators retrieved successfully' })
   async findAdministrators(): Promise<User[]> {
-    return this.usersService.findAdminUsers();
+    return this.usersService.findAdministrators();
   }
 
   /**
    * Get user statistics (Admin only)
    */
   @Get('stats/overview')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMINISTRATOR)
   @ApiOperation({ summary: 'Get user statistics (Admin only)' })
   @ApiResponse({ status: 200, description: 'Statistics retrieved successfully' })
   async getUserStats(): Promise<{
     totalUsers: number;
-    admins: number;
-    faculty: number;
-    students: number;
+    administrators: number;
+    facilitators: number;
+    participants: number;
     activeUsers: number;
   }> {
     return this.usersService.getUserStats();
@@ -120,7 +94,7 @@ export class UsersController {
    * Get users by role with pagination (Admin only)
    */
   @Get('role/:role')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMINISTRATOR)
   @ApiOperation({ summary: 'Get users by role with pagination (Admin only)' })
   @ApiQuery({ name: 'skip', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -144,10 +118,10 @@ export class UsersController {
   }
 
   /**
-   * Search users by name, email, or student ID
+   * Search users by name, email, or participant ID
    */
   @Get('search/:query')
-  @ApiOperation({ summary: 'Search users by name, email, or student ID' })
+  @ApiOperation({ summary: 'Search users by name, email, or participant ID' })
   @ApiResponse({ status: 200, description: 'Search results retrieved' })
   @ApiResponse({ status: 400, description: 'Query must be at least 2 characters' })
   async searchUsers(@Param('query') query: string): Promise<User[]> {
@@ -167,15 +141,15 @@ export class UsersController {
   }
 
   /**
-   * Find user by student ID
+   * Find user by participant ID
    */
-  @Get('by-student-id/:studentId')
-  @ApiOperation({ summary: 'Find user by student ID' })
+  @Get('by-participant-id/:participantId')
+  @ApiOperation({ summary: 'Find user by participant ID' })
   @ApiResponse({ status: 200, description: 'User retrieved successfully' })
-  @ApiResponse({ status: 400, description: 'Student ID is required' })
+  @ApiResponse({ status: 400, description: 'Participant ID is required' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async findByStudentId(@Param('studentId') studentId: string): Promise<User | null> {
-    return this.usersService.findByStudentId(studentId);
+  async findByParticipantId(@Param('participantId') participantId: string): Promise<User | null> {
+    return this.usersService.findByParticipantId(participantId);
   }
 
   /**
@@ -205,7 +179,7 @@ export class UsersController {
     @Req() req: any,
   ): Promise<User> {
     // Users can only update their own profile unless admin
-    if (req.user._id.toString() !== id && req.user.role !== UserRole.ADMIN) {
+    if (req.user._id.toString() !== id && req.user.role !== UserRole.ADMINISTRATOR) {
       throw new BadRequestException(
         'You can only update your own profile',
       );
@@ -217,7 +191,7 @@ export class UsersController {
    * Deactivate user (Admin only)
    */
   @Patch(':id/deactivate')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMINISTRATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Deactivate user (Admin only)' })
   @ApiResponse({ status: 200, description: 'User deactivated successfully' })
@@ -231,7 +205,7 @@ export class UsersController {
    * Activate user (Admin only)
    */
   @Patch(':id/activate')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMINISTRATOR)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate user (Admin only)' })
   @ApiResponse({ status: 200, description: 'User activated successfully' })

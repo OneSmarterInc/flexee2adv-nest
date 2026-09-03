@@ -15,10 +15,10 @@ import {
   SimulationStatus,
 } from './dto/update-simulation.dto';
 import {
-  EnrollStudentsDto,
+  EnrollParticipantsDto,
   EnrollmentResponseDto,
   FirmWithEnrollmentsDto,
-} from './dto/enroll-students.dto';
+} from './dto/enroll-participants.dto';
 import { TriggerEventDto } from './dto/trigger-event.dto';
 import { UpdateFeaturesDto } from './dto/update-features.dto';
 import { ModuleScheduleDto } from './dto/create-simulation.dto';
@@ -93,8 +93,8 @@ import {
   DCSalesResult,
   Technology,
   TechnologyDocument,
-  StudentOnboarding,
-  StudentOnboardingDocument,
+  ParticipantOnboarding,
+  ParticipantOnboardingDocument,
 } from '../../entities/index.entity';
 import {
   processCustomerPools,
@@ -356,8 +356,8 @@ export class SimulationService {
     private eventImpactModel: Model<EventImpactDocument>,
     @InjectModel(Technology.name)
     private technologyModel: Model<TechnologyDocument>,
-    @InjectModel(StudentOnboarding.name)
-    private studentOnboardingModel: Model<StudentOnboardingDocument>,
+    @InjectModel(ParticipantOnboarding.name)
+    private participantOnboardingModel: Model<ParticipantOnboardingDocument>,
   ) {}
 
   // ============================================================================
@@ -729,7 +729,7 @@ export class SimulationService {
       demandVariability: dto.demandVariability ?? 0.05,
       courseCode: dto.courseCode,
       institutionName: dto.institutionName,
-      facultyIds: dto.facultyIds?.map((id) => this.toObjectId(id)) ?? [],
+      facilitatorIds: dto.facilitatorIds?.map((id) => this.toObjectId(id)) ?? [],
       owner: this.toObjectId(userId),
     });
 
@@ -902,8 +902,8 @@ export class SimulationService {
       // Supply chain risk management
       this.scrmHistoryModel.deleteMany({ simulation: simulationId }),
 
-      // Student onboarding (invites)
-      this.studentOnboardingModel.deleteMany({ simulation: simulationId }),
+      // Participant onboarding (invites)
+      this.participantOnboardingModel.deleteMany({ simulation: simulationId }),
     ]);
 
     // Delete the simulation itself last so a partial failure leaves a
@@ -1706,7 +1706,7 @@ export class SimulationService {
     let retailerInventory = prevState.retailerInventory || 0;
     let retailerMode: RetailerMode = RetailerMode.NORMAL;
     let shipmentToRetailer = Math.round(retailDemand * 1.1); // Default 10% buffer
-    // Hoisted so the channel position can be reported. Students could see that
+    // Hoisted so the channel position can be reported. Participants could see that
     // finished goods were not selling but had no way to see why: the retailer's
     // own coverage is what decides how much it orders.
     const retailerMonthlyDemand = retailDemand / 3;
@@ -2017,7 +2017,7 @@ export class SimulationService {
     // ========================================================================
     // VMI RETAILER IMPACT SNAPSHOT
     // Compute what VMI did (or would have done) this quarter so we can
-    // store it and show students the bullwhip reduction in real numbers.
+    // store it and show participants the bullwhip reduction in real numbers.
     // ========================================================================
 
     // These are already computed inside the retailerBrain block above.
@@ -3584,14 +3584,14 @@ export class SimulationService {
     if (!user) throw new NotFoundException('User not found');
 
     let simulations: SimulationDocument[];
-    if (user.role === UserRole.ADMIN) {
+    if (user.role === UserRole.ADMINISTRATOR) {
       simulations = await this.simulationModel.find().sort({ createdAt: -1 });
-    } else if (user.role === UserRole.FACULTY) {
+    } else if (user.role === UserRole.FACILITATOR) {
       simulations = await this.simulationModel
         .find({
           $or: [
             { owner: this.toObjectId(userId) },
-            { facultyIds: this.toObjectId(userId) },
+            { facilitatorIds: this.toObjectId(userId) },
           ],
         })
         .sort({ createdAt: -1 });
@@ -4171,7 +4171,7 @@ export class SimulationService {
     for (const firm of firms) {
       const enrollments = await this.enrollmentModel
         .find({ firm: firm._id })
-        .populate('user', 'email firstName lastName studentId');
+        .populate('user', 'email firstName lastName participantId');
 
       result.push({
         firm: {
@@ -4187,7 +4187,7 @@ export class SimulationService {
             email: (e.user as any).email,
             firstName: (e.user as any).firstName,
             lastName: (e.user as any).lastName,
-            studentId: (e.user as any).studentId,
+            participantId: (e.user as any).participantId,
           },
           status: e.status,
           role: e.role,
@@ -4205,9 +4205,9 @@ export class SimulationService {
     return { simulationId, firms: result };
   }
 
-  async enrollStudentsInFirm(
+  async enrollParticipantsInFirm(
     simulationId: string,
-    dto: EnrollStudentsDto,
+    dto: EnrollParticipantsDto,
   ): Promise<EnrollmentResponseDto[]> {
     const simObjectId = this.toObjectId(simulationId);
     const simulation = await this.simulationModel.findById(simObjectId);
@@ -4235,21 +4235,21 @@ export class SimulationService {
     const firmId = firm._id as Types.ObjectId;
     const enrollments: EnrollmentResponseDto[] = [];
 
-    for (const student of dto.students) {
-      const user = await this.userModel.findById(student.studentId);
+    for (const participant of dto.participants) {
+      const user = await this.userModel.findById(participant.participantId);
       if (!user)
-        throw new NotFoundException(`User ${student.studentId} not found`);
+        throw new NotFoundException(`User ${participant.participantId} not found`);
 
       const existingEnrollment = await this.enrollmentModel.findOne({
         simulation: simObjectId,
-        user: this.toObjectId(student.studentId),
+        user: this.toObjectId(participant.participantId),
       });
       if (existingEnrollment) {
         // Update existing enrollment instead of creating duplicate
         existingEnrollment.firm = firmId;
         existingEnrollment.firmNumber = firm.firmNumber;
         existingEnrollment.status = EnrollmentStatus.ACTIVE;
-        existingEnrollment.role = student.role ?? EnrollmentRole.TEAM_MEMBER;
+        existingEnrollment.role = participant.role ?? EnrollmentRole.TEAM_MEMBER;
         existingEnrollment.teamName = dto.teamName;
         existingEnrollment.canSubmitDecisions = dto.canSubmitDecisions ?? true;
         existingEnrollment.canViewReports = dto.canViewReports ?? true;
@@ -4259,10 +4259,10 @@ export class SimulationService {
         // Keep existing decisionsSubmitted count
       }
 
-      // Count submitted decisions for this student in this firm
+      // Count submitted decisions for this participant in this firm
       const submittedCount = await this.decisionModel.countDocuments({
         firm: firmId,
-        submittedBy: this.toObjectId(student.studentId),
+        submittedBy: this.toObjectId(participant.participantId),
         status: { $in: ['SUBMITTED', 'PROCESSED'] },
       });
 
@@ -4271,10 +4271,10 @@ export class SimulationService {
         new this.enrollmentModel({
           simulation: simObjectId,
           firm: firmId,
-          user: this.toObjectId(student.studentId),
+          user: this.toObjectId(participant.participantId),
           firmNumber: firm.firmNumber,
           status: EnrollmentStatus.ACTIVE,
-          role: student.role ?? 'TEAM_MEMBER',
+          role: participant.role ?? 'TEAM_MEMBER',
           teamName: dto.teamName,
           canSubmitDecisions: dto.canSubmitDecisions ?? true,
           canViewReports: dto.canViewReports ?? true,
@@ -4288,7 +4288,7 @@ export class SimulationService {
 
       if (!existingEnrollment) {
         await this.firmModel.findByIdAndUpdate(firmId, {
-          $addToSet: { members: student.studentId },
+          $addToSet: { members: participant.participantId },
         });
       }
 
@@ -4637,12 +4637,12 @@ export class SimulationService {
       type: eventDto.type,
       effect: config.effect,
       name: eventDto.name || config.name,
-      description: eventDto.description || `Faculty-triggered ${config.name}`,
+      description: eventDto.description || `Facilitator-triggered ${config.name}`,
       startQuarter: simulation.currentQuarter,
       duration: eventDto.duration || config.defaultDuration,
       magnitude: eventDto.magnitude || config.defaultMagnitude,
       isActive: true,
-      source: 'FACULTY_TRIGGERED',
+      source: 'FACILITATOR_TRIGGERED',
       triggeredBy: this.toObjectId(userId),
       // GAS behavior: ALL events apply to ALL firms equally
       // Empty array = affects ALL firms (matching GAS behavior)
@@ -4803,8 +4803,8 @@ export class SimulationService {
   ): Promise<{ hasAccess: boolean; role: string; firmId?: string }> {
     const user = await this.userModel.findById(userId);
     if (!user) return { hasAccess: false, role: 'none' };
-    if (user.role === UserRole.ADMIN)
-      return { hasAccess: true, role: UserRole.ADMIN };
+    if (user.role === UserRole.ADMINISTRATOR)
+      return { hasAccess: true, role: UserRole.ADMINISTRATOR };
 
     const simObjectId = this.toObjectId(simulationId);
     const simulation = await this.simulationModel.findById(simObjectId);
@@ -4832,10 +4832,10 @@ export class SimulationService {
     return { hasAccess: false, role: 'none' };
   }
 
-  async findSimulationsByFaculty(facultyId: string): Promise<any[]> {
-    const objectId = this.toObjectId(facultyId);
+  async findSimulationsByFacilitator(facilitatorId: string): Promise<any[]> {
+    const objectId = this.toObjectId(facilitatorId);
     const simulations = await this.simulationModel
-      .find({ $or: [{ owner: objectId }, { facultyIds: { $in: [objectId] } }] })
+      .find({ $or: [{ owner: objectId }, { facilitatorIds: { $in: [objectId] } }] })
       .sort({ createdAt: -1 });
     return Promise.all(
       simulations.map(async (sim) => {
@@ -4860,10 +4860,10 @@ export class SimulationService {
     );
   }
 
-  async findSimulationsByStudent(studentId: string): Promise<any[]> {
+  async findSimulationsByParticipant(participantId: string): Promise<any[]> {
     const enrollments = await this.enrollmentModel
       .find({
-        user: this.toObjectId(studentId),
+        user: this.toObjectId(participantId),
         status: { $in: [EnrollmentStatus.ACTIVE, EnrollmentStatus.PENDING_FIRM_ASSIGNMENT] },
       })
       .populate('simulation')
@@ -5158,7 +5158,7 @@ export class SimulationService {
     }
 
     // Create next quarter's initial states for all firms by copying previous quarter's state
-    // This ensures inventory is carried forward and students have data to work with
+    // This ensures inventory is carried forward and participants have data to work with
     for (const firm of firms) {
       const prevQuarterState = await this.quarterStateModel.findOne({
         simulation: simObjectId,
@@ -5220,7 +5220,7 @@ export class SimulationService {
       }
     }
 
-    // Generate demand for the next quarter so it's available for students
+    // Generate demand for the next quarter so it's available for participants
     const nextQuarterDemand = await this.demandHistoryModel.findOne({
       simulation: simObjectId,
       quarter: nextQuarter,
@@ -7031,7 +7031,7 @@ export class SimulationService {
   }
 
   // ============================================================================
-  // EVENT IMPACT TRACKING - Faculty Dashboard Methods
+  // EVENT IMPACT TRACKING - Facilitator Dashboard Methods
   // ============================================================================
 
   /**
@@ -7064,16 +7064,16 @@ export class SimulationService {
   }
 
   /**
-   * Get summary of faculty-triggered events for dashboard
+   * Get summary of facilitator-triggered events for dashboard
    */
-  async getFacultyEventSummary(simulationId: string): Promise<any> {
+  async getFacilitatorEventSummary(simulationId: string): Promise<any> {
     const simObjectId = this.toObjectId(simulationId);
 
     const summary = await this.eventImpactModel.aggregate([
       {
         $match: {
           simulation: simObjectId,
-          source: 'FACULTY_TRIGGERED',
+          source: 'FACILITATOR_TRIGGERED',
         },
       },
       {
