@@ -347,6 +347,31 @@ export class SimulationController {
     );
   }
 
+  @Get(':simulationId/firms/:firmId/supplier-scorecard')
+  @ApiOperation({
+    summary:
+      'Executive supplier scorecard - on-time, quality and price variance by supplier',
+  })
+  @ApiParam({ name: 'simulationId', description: 'Simulation ObjectId' })
+  @ApiParam({ name: 'firmId', description: 'Firm ObjectId or firmNumber' })
+  @ApiQuery({
+    name: 'quarters',
+    required: false,
+    description: 'Limit to the most recent N quarters',
+  })
+  @ApiResponse({ status: 200, description: 'Supplier scorecard retrieved' })
+  async getSupplierScorecard(
+    @Param('simulationId') simulationId: string,
+    @Param('firmId') firmId: string,
+    @Query('quarters') quarters?: number,
+  ) {
+    return this.simulationService.getSupplierScorecard(
+      simulationId,
+      firmId,
+      quarters,
+    );
+  }
+
   @Get(':simulationId/firms/:firmId/credit-history')
   @ApiOperation({ summary: 'Get credit facility history for a firm' })
   async getCreditHistory(

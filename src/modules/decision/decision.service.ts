@@ -437,7 +437,7 @@ export class DecisionService {
           `Need: ${partsNeeded.toLocaleString()} (${totalProduction.toLocaleString()} units × 3 parts/unit). ` +
           `Available: ${partsAvailable.toLocaleString()} ${breakdown}. ` +
           `Shortfall: ${shortfall.toLocaleString()} parts. ` +
-          `Increase regional orders ($195/unit, same-quarter delivery) or reduce production.`,
+          `Increase regional orders ($${SUPPLIER_CONFIG[SupplierType.REGIONAL].unitCost}/unit, same-quarter delivery) or reduce production.`,
         );
       }
       
@@ -449,6 +449,33 @@ export class DecisionService {
           `${inventoryAfterProduction.toLocaleString()} parts will carry to Q${currentQuarter + 1}`,
         );
       }
+    }
+
+    // Supplier order limits. These are published on the supplier cards but were
+    // never enforced, so an order well beyond a supplier's stated capacity
+    // (e.g. 1.3M units against a 500K regional cap) passed validation.
+    const globalCfg = SUPPLIER_CONFIG[SupplierType.GLOBAL];
+    const regionalCfg = SUPPLIER_CONFIG[SupplierType.REGIONAL];
+    const orderGlobalQty = decision.orderGlobal ?? 0;
+    const orderRegionalQty = decision.orderRegional ?? 0;
+
+    if (orderGlobalQty > 0 && orderGlobalQty < globalCfg.minOrder) {
+      errors.push(
+        `Global order (${orderGlobalQty.toLocaleString()} units) is below ` +
+          `${globalCfg.name}'s minimum of ${globalCfg.minOrder.toLocaleString()} units.`,
+      );
+    }
+    if (orderGlobalQty > globalCfg.maxOrder) {
+      errors.push(
+        `Global order (${orderGlobalQty.toLocaleString()} units) exceeds ` +
+          `${globalCfg.name}'s capacity of ${globalCfg.maxOrder.toLocaleString()} units per quarter.`,
+      );
+    }
+    if (orderRegionalQty > regionalCfg.maxOrder) {
+      errors.push(
+        `Regional order (${orderRegionalQty.toLocaleString()} units) exceeds ` +
+          `${regionalCfg.name}'s capacity of ${regionalCfg.maxOrder.toLocaleString()} units per quarter.`,
+      );
     }
 
     // FIX 7: Pricing validation (GAS: P1 $250–$1000, P2 $425–$1500)
@@ -935,9 +962,14 @@ export class DecisionService {
   private buildDecisionDefaults(prev: DecisionDocument | null): Record<string, any> {
     return {
       // Forecasting
-      forecastR1:     prev?.forecastR1     ?? 80000,
-      forecastR2:     prev?.forecastR2     ?? 70000,
-      forecastR3:     prev?.forecastR3     ?? 50000,
+      // Defaults are market-scale, matching the "last demand" figure shown next
+      // to each input (demand_history is market-wide). They used to be
+      // firm-scale (80k/70k/50k), so the form prefilled one scale while the
+      // on-screen reference showed another - students forecast against
+      // whichever they happened to read.
+      forecastR1:     prev?.forecastR1     ?? 240000,
+      forecastR2:     prev?.forecastR2     ?? 210000,
+      forecastR3:     prev?.forecastR3     ?? 150000,
       forecastMethod: prev?.forecastMethod ?? 'GUT',
 
       // Supplier (Analytics Mode)

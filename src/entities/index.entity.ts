@@ -2660,6 +2660,9 @@ export const SUPPLIER_CONFIG: Record<
     baseOnTime: number;
     baseQuality: number;
     baseFlexibility: number;
+    // Incoming material defect rate. Folded into the plant defect rate via
+    // CONFIG.quality.SUPPLIER_QUALITY_WEIGHT (GAS: per-supplier defectRate).
+    defectRate: number;
   }
 > = {
   [SupplierType.GLOBAL]: {
@@ -2676,6 +2679,7 @@ export const SUPPLIER_CONFIG: Record<
     baseOnTime: 0.92,
     baseQuality: 0.95,
     baseFlexibility: 0.6,
+    defectRate: 0.025,                  // GAS: 2.5% incoming defect rate
   },
   [SupplierType.REGIONAL]: {
     id: 'REGIONAL',
@@ -2691,6 +2695,7 @@ export const SUPPLIER_CONFIG: Record<
     baseOnTime: 0.95,
     baseQuality: 0.93,
     baseFlexibility: 0.9,
+    defectRate: 0.010,                  // GAS: 1.0% incoming defect rate
   },
 };
 

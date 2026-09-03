@@ -1067,7 +1067,9 @@ export class SimulationService {
     // Calculate accuracy (inverse of MAPE, capped at 100%)
     const accuracy = Math.max(0, Math.min(1, 1 - mape));
 
-    await this.forecastLogModel.create({
+    await this.forecastLogModel.findOneAndUpdate(
+      { simulation: simulationId, firm: firmId, quarter },
+      {
       simulation: simulationId,
       firm: firmId,
       quarter,
@@ -1097,7 +1099,9 @@ export class SimulationService {
       mape,
       bias,
       accuracy,
-    });
+      },
+      { upsert: true, new: true },
+    );
   }
 
   // Update preSeedQuarters to call forecast accuracy recording:
@@ -1408,15 +1412,55 @@ export class SimulationService {
     }
 
     // ========================================================================
+    // RANDOM EVENTS - Only process if feature enabled
+    // ========================================================================
+    // Events are resolved BEFORE procurement and demand so that supply and
+    // demand disruptions actually affect the quarter they fire in. (GAS
+    // parity: eventEffect is computed ahead of the procurement block; running
+    // it afterwards left partsDelayed/demandModifier computed but discarded.)
+    let eventImpact: {
+      costIncrease: number;
+      demandModifier: number;
+      partsDelayed: number;
+      eventImpacts: any[];
+    } = {
+      costIncrease: 0,
+      demandModifier: 1.0,
+      partsDelayed: 0,
+      eventImpacts: [],
+    };
+
+    if (features.randomEvents) {
+      eventImpact = await this.processRandomEvents(
+        simulationId,
+        firmId,
+        quarter,
+        prevState,
+        firm.techOwned || [], // Pass techOwned for Control Tower mitigation
+      );
+    }
+
+    // ========================================================================
     // PROCUREMENT
     // ========================================================================
-    const arrivingParts = prevState.ordersInTransit || 0;
-    const totalPartsAvailable = prevState.rawMaterialUnits + arrivingParts;
+    // Global orders carry a 1-quarter lead time and land as ordersInTransit.
+    // Regional orders are same-quarter delivery and are available to this
+    // quarter's production run (GAS: totalPartsAvailable =
+    // Raw_Material_Units + arrivingParts + regionalParts).
+    const regionalParts = decisions.orderRegional || 0;
+    const arrivingParts = Math.max(
+      0,
+      (prevState.ordersInTransit || 0) - eventImpact.partsDelayed,
+    );
+    const totalPartsAvailable =
+      prevState.rawMaterialUnits + arrivingParts + regionalParts;
+    // Unit costs come from SUPPLIER_CONFIG so the price quoted on the decision
+    // screen and the price actually billed here cannot drift apart.
     const procurementCost =
-      decisions.orderGlobal * C.RAW_MATERIAL_COST +
-      (decisions.orderRegional || 0) *
-        C.RAW_MATERIAL_COST *
-        (1 + C.EMERGENCY_PROCUREMENT_PREMIUM);
+      decisions.orderGlobal * SUPPLIER_CONFIG[SupplierType.GLOBAL].unitCost +
+      regionalParts * SUPPLIER_CONFIG[SupplierType.REGIONAL].unitCost;
+    const adjustedProcurementCost =
+      procurementCost * (1 + eventImpact.costIncrease);
 
     // ========================================================================
     // PRODUCTION - P1, P2, and P3 (if productInnovation enabled)
@@ -1471,7 +1515,24 @@ export class SimulationService {
     // ========================================================================
     // QUALITY CONTROL - Only if feature enabled
     // ========================================================================
-    let defectRate = P.BASE_DEFECT_RATE;
+    // Volume-weighted incoming defect rate across the suppliers actually used
+    // this quarter. GAS carries a per-supplier defectRate and folds it into the
+    // plant defect rate via SUPPLIER_QUALITY_WEIGHT; the port previously used a
+    // flat BASE_DEFECT_RATE, so supplier quality had no consequence at all.
+    const globalOrderedUnits = decisions.orderGlobal || 0;
+    const supplierUnitsOrdered = globalOrderedUnits + regionalParts;
+    const weightedSupplierDefectRate =
+      supplierUnitsOrdered > 0
+        ? (globalOrderedUnits *
+            SUPPLIER_CONFIG[SupplierType.GLOBAL].defectRate +
+            regionalParts *
+              SUPPLIER_CONFIG[SupplierType.REGIONAL].defectRate) /
+          supplierUnitsOrdered
+        : SUPPLIER_CONFIG[SupplierType.GLOBAL].defectRate;
+
+    let defectRate =
+      P.BASE_DEFECT_RATE +
+      weightedSupplierDefectRate * CONFIG.quality.SUPPLIER_QUALITY_WEIGHT;
     let qualityCost = 0;
     let defectsProduced = 0;
     let defectsDetected = 0;
@@ -1507,6 +1568,7 @@ export class SimulationService {
     let dcCentralInventory = prevState.dcCentralInventory || 0;
     let dcWestOpen = prevState.dcWestOpen || false;
     let dcWestInventory = prevState.dcWestInventory || 0;
+    let dcServiceBonus = 0;
     let dcTotalOpex = 0,
       dcSetupCost = 0,
       dcDisposalRecovery = 0,
@@ -1531,6 +1593,12 @@ export class SimulationService {
       allocatedToCentral = dcResult.allocatedToCentral;
       allocatedToWest = dcResult.allocatedToWest;
       availableFGUnits -= allocatedToCentral + allocatedToWest;
+      // Service benefit of holding regional stock (GAS flexeemaster.gs:4875,
+      // 4906). Only the increment above the factory baseline is applied, so a
+      // firm with no DC is unaffected; previously DCs were pure cost with no
+      // service upside, making them strictly dominated.
+      if (dcCentralOpen) dcServiceBonus += CONFIG.dc.CENTRAL.serviceBonus;
+      if (dcWestOpen) dcServiceBonus += CONFIG.dc.WEST.serviceBonus;
     }
 
     // ========================================================================
@@ -1613,7 +1681,8 @@ export class SimulationService {
       (firmBaseDemand + p3DemandEffect) *
         priceEffect *
         csiEffect *
-        greenScoreEffect,
+        greenScoreEffect *
+        eventImpact.demandModifier,
     );
 
     // ========================================================================
@@ -1668,6 +1737,11 @@ export class SimulationService {
     }
     // If retailerBrain is disabled, retailer just orders steadily (shipmentToRetailer already set)
 
+    // Regional DC stock is part of the shippable pool. Units allocated to a DC
+    // used to leave the factory and never come back - they inflated the
+    // shipping cap but were never sold or depleted, so they accumulated
+    // forever. They are now real forward inventory: they fulfil demand in the
+    // region their DC serves and draw down as they ship.
     const totalAvailableForShipping =
       availableFGUnits + dcCentralInventory + dcWestInventory;
     shipmentToRetailer = Math.min(
@@ -1684,28 +1758,21 @@ export class SimulationService {
     const shippedUnits = shipmentToRetailer + directDemand;
 
     if (features.multiCarrierSelection) {
-      // Advanced: Multi-carrier selection with volume discounts
-      const carrierMode = decisions.carrier || CarrierMode.TRUCK;
-      const carrierConfig =
-        CONFIG.carrier[carrierMode] || CONFIG.carrier[CarrierMode.TRUCK];
-      freightCost = shippedUnits * carrierConfig.costPerUnit;
-
-      // Volume discount for truck
-      if (
-        carrierMode === CarrierMode.TRUCK &&
-        carrierConfig.volumeDiscountThreshold &&
-        shippedUnits > carrierConfig.volumeDiscountThreshold
-      ) {
-        freightCost *= 1 - carrierConfig.volumeDiscountRate;
-      }
-
-      onTimeRate = carrierConfig.onTimeRate;
-      damageRate = carrierConfig.damageRate;
-
-      // TMS discount if owned
-      if (firm.techOwned?.includes(TechnologyType.TMS)) {
-        freightCost *= 1 - CONFIG.carrier.TMS_DISCOUNT;
-      }
+      // Advanced: multi-carrier selection. Delegates to processMultiCarrier so
+      // the DC-aware rules actually apply - a firm with no regional DC is
+      // forced onto Air, and a firm with one pays last-mile (GAS
+      // flexeemaster.gs:5609-5660). The previous inline block ignored both,
+      // understating freight for firms with no DC open.
+      const carrierResult = this.processMultiCarrier(
+        decisions,
+        firm,
+        shippedUnits,
+        dcCentralOpen || dcWestOpen,
+        features,
+      );
+      freightCost = carrierResult.freightCost;
+      onTimeRate = carrierResult.onTimeRate;
+      damageRate = carrierResult.damageRate;
     } else if (features.transportLogistics) {
       // Basic: Shipping mode selection (standard/express/air)
       const shippingMode = decisions.shippingMode || 'STANDARD';
@@ -1722,6 +1789,10 @@ export class SimulationService {
       freightCost = shippedUnits * 3; // $3 default
     }
 
+    if (dcServiceBonus > 0) {
+      onTimeRate = Math.min(1, onTimeRate + dcServiceBonus);
+    }
+
     // ========================================================================
     // SALES CALCULATION
     // ========================================================================
@@ -1729,20 +1800,53 @@ export class SimulationService {
       retailDemand,
       retailerInventory + shipmentToRetailer,
     );
-    const fgAfterRetailer = Math.max(0, availableFGUnits - shipmentToRetailer);
-    const directSales = Math.min(directDemand, fgAfterRetailer);
+    const poolAfterRetailer = Math.max(
+      0,
+      totalAvailableForShipping - shipmentToRetailer,
+    );
+    const directSales = Math.min(directDemand, poolAfterRetailer);
     const unitsSold = retailSales + directSales;
     const stockoutUnits = totalFirmDemand - unitsSold;
     const fillRate = totalFirmDemand > 0 ? unitsSold / totalFirmDemand : 1;
 
-    const endingFGUnits = Math.max(
-      0,
-      availableFGUnits - shipmentToRetailer - directSales,
-    );
+    // Draw the shipped volume from the DCs first, each capped by the demand in
+    // the region it serves (Central -> R2, West -> R3); the factory covers the
+    // balance. This is what makes a DC worth opening: it holds stock forward,
+    // cheaper, closer to its region.
+    const unitsOut = shipmentToRetailer + directSales;
+    const fromCentral = dcCentralOpen
+      ? Math.min(
+          dcCentralInventory,
+          Math.round(unitsOut * M.REGIONS[2].marketShare),
+        )
+      : 0;
+    const fromWest = dcWestOpen
+      ? Math.min(dcWestInventory, Math.round(unitsOut * M.REGIONS[3].marketShare))
+      : 0;
+    dcCentralInventory -= fromCentral;
+    dcWestInventory -= fromWest;
+    const fromFactory = Math.max(0, unitsOut - fromCentral - fromWest);
+
+    const endingFGUnits = Math.max(0, availableFGUnits - fromFactory);
     const endingRetailerInv = Math.max(
       0,
       retailerInventory - retailSales + shipmentToRetailer,
     );
+
+    // Defects that inspection missed ship to customers and come back as
+    // returns (GAS flexeemaster.gs:5318-5330). The port computed defects and
+    // then ignored their downstream cost entirely, so inspection level had no
+    // consequence beyond its own line-item cost.
+    const defectsUndetected = Math.max(0, defectsProduced - defectsDetected);
+    const defectiveShipped = Math.min(defectsUndetected, unitsSold);
+    const productDefectReturns = Math.round(
+      defectiveShipped * CONFIG.quality.RETURN_RATE,
+    );
+    const returnCost = productDefectReturns * CONFIG.quality.RETURN_COST;
+    const productReturnRate =
+      unitsSold > 0 ? productDefectReturns / unitsSold : 0;
+    const qualityCsiPenalty =
+      productReturnRate * 100 * CONFIG.quality.CSI_PENALTY_PER_RETURN_PCT;
 
     // Calculate demand by region for warranty processing
     const demandByRegion = {
@@ -2038,35 +2142,6 @@ export class SimulationService {
     }
 
     // ========================================================================
-    // RANDOM EVENTS - Only process if feature enabled
-    // ========================================================================
-    let eventImpact: {
-      costIncrease: number;
-      demandModifier: number;
-      partsDelayed: number;
-      eventImpacts: any[];
-    } = {
-      costIncrease: 0,
-      demandModifier: 1.0,
-      partsDelayed: 0,
-      eventImpacts: [],
-    };
-
-    if (features.randomEvents) {
-      eventImpact = await this.processRandomEvents(
-        simulationId,
-        firmId,
-        quarter,
-        prevState,
-        firm.techOwned || [], // Pass techOwned for Control Tower mitigation
-      );
-    }
-
-    // Apply event impacts
-    const adjustedProcurementCost =
-      procurementCost * (1 + eventImpact.costIncrease);
-
-    // ========================================================================
     // FINANCIALS
     // ========================================================================
     const directRevenue = directSales * avgPrice;
@@ -2092,8 +2167,14 @@ export class SimulationService {
     const cogs = (shipmentToRetailer + directSales) * C.STANDARD_COGS;
     const grossProfit = revenue - cogs;
 
+    // DC stock is cheaper to hold than factory stock but is not free, which is
+    // what it effectively was - DC inventory carried no holding cost at all
+    // and CONFIG.dc.DC_HOLDING_COST_MULTIPLIER went unused.
     const holdingCost =
-      (endingRawUnits + endingFGUnits) * F.HOLDING_COST_PER_UNIT;
+      (endingRawUnits + endingFGUnits) * F.HOLDING_COST_PER_UNIT +
+      (dcCentralInventory + dcWestInventory) *
+        F.HOLDING_COST_PER_UNIT *
+        CONFIG.dc.DC_HOLDING_COST_MULTIPLIER;
     const unfilledOrderCost = stockoutUnits * C.UNFILLED_ORDER_COST;
 
     // FIX: totalOpex uses vmiOngoingCost only (recurring opex).
@@ -2114,6 +2195,7 @@ export class SimulationService {
       disposalRecovery +
       ecoPackagingCost +
       unfilledOrderCost +
+      returnCost +
       transferCost +
       vmiOngoingCost +
       p3LaunchCost +
@@ -2145,6 +2227,7 @@ export class SimulationService {
       disposalRecovery -
       dcDisposalRecovery +
       ecoPackagingCost +
+      returnCost +
       transferCost +
       vmiSetupCost +
       vmiOngoingCost +
@@ -2208,7 +2291,7 @@ export class SimulationService {
     // CSI CALCULATION
     // ========================================================================
     const warrantyTier = decisions.warrantyTier || WarrantyTier.STANDARD;
-    const newCSI = this.calculateCSI(
+    const baseCSI = this.calculateCSI(
       fillRate,
       defectRate,
       onTimeRate,
@@ -2216,6 +2299,10 @@ export class SimulationService {
       greenScore,
       warrantyTier,
       features.returnsGreenScore,
+    );
+    const newCSI = Math.max(
+      50,
+      Math.min(100, baseCSI + dcServiceBonus * 100 - qualityCsiPenalty),
     );
 
     // ========================================================================
@@ -2240,17 +2327,51 @@ export class SimulationService {
     // ========================================================================
     // PERFECT ORDER - Calculate (tracking optional but always computed)
     // ========================================================================
-    const damageFree = 1 - damageRate;
-    const inFull = fillRate;
-    let perfectOrderOverall =
-      onTimeRate * inFull * damageFree * PO.BASE_DOCUMENTATION;
+    // Perfect order components, ported from GAS calculatePerfectOrder_
+    // (flexeemaster.gs:5087-5132). The port previously used fillRate directly
+    // as in-full, multiplied the whole score by the overload penalty instead
+    // of applying it to on-time, and ignored rush damage and the CSI
+    // documentation effect - leaving STOCKOUT_IN_FULL_PENALTY,
+    // RUSH_DAMAGE_PENALTY and CSI_DOCUMENTATION_BONUS unused in config.
+    let poOnTime = onTimeRate;
+    let inFull = PO.BASE_IN_FULL;
+    let damageFree = (1 - damageRate) * PO.BASE_DAMAGE_FREE;
+    let documentation = PO.BASE_DOCUMENTATION;
+
+    // 1. Stockouts reduce in-full
+    if (totalFirmDemand > 0 && stockoutUnits > 0) {
+      const stockoutRate = stockoutUnits / totalFirmDemand;
+      inFull = inFull * (1 - stockoutRate * PO.STOCKOUT_IN_FULL_PENALTY);
+    }
+    // 2. Running hot hurts on-time
+    if (capacityUtilization > 0.9) {
+      poOnTime = poOnTime * (1 - (capacityUtilization - 0.9) * PO.OVERLOAD_ON_TIME_PENALTY);
+    }
+    // 3. Rush operations increase damage
+    if (capacityUtilization > 0.85) {
+      damageFree =
+        damageFree * (1 - (capacityUtilization - 0.85) * PO.RUSH_DAMAGE_PENALTY);
+    }
+    // 4. High CSI reflects better processes -> cleaner documentation
+    if (newCSI > 85) {
+      documentation = Math.min(
+        1,
+        documentation + ((newCSI - 85) * PO.CSI_DOCUMENTATION_BONUS) / 100,
+      );
+    }
+    // 5. Poor fill rate drags overall reliability
+    if (fillRate < 0.9) {
+      poOnTime = poOnTime * (0.9 + fillRate * 0.1);
+    }
+
+    poOnTime = Math.max(0.5, Math.min(1, poOnTime));
+    inFull = Math.max(0.5, Math.min(1, inFull));
+    damageFree = Math.max(0.8, Math.min(1, damageFree));
+    documentation = Math.max(0.9, Math.min(1, documentation));
+
+    let perfectOrderOverall = poOnTime * inFull * damageFree * documentation;
 
     if (features.perfectOrderTracking) {
-      // Apply additional factors from CONFIG
-      if (capacityUtilization > CONFIG.expansion.OVERTIME_THRESHOLD) {
-        perfectOrderOverall *= 1 - PO.OVERLOAD_ON_TIME_PENALTY;
-      }
-      // Tech bonuses
       if (firm.techOwned?.includes(TechnologyType.OMS)) {
         perfectOrderOverall = Math.min(
           1,
@@ -2298,10 +2419,10 @@ export class SimulationService {
           vmiSnapshot,
           prevPriceP1: decisions.priceP1,
           perfectOrder: {
-            onTime: onTimeRate,
+            onTime: poOnTime,
             inFull,
             damageFree,
-            documentation: PO.BASE_DOCUMENTATION,
+            documentation,
             overall: perfectOrderOverall,
           },
           techMaintenanceCost,
@@ -2333,6 +2454,35 @@ export class SimulationService {
       },
       { upsert: true, new: true },
     );
+
+    // ========================================================================
+    // SUPPLIER SCORECARD
+    // ========================================================================
+    // Recorded against what actually arrived, not against a random roll.
+    // Global orders are judged on the shipment that was due this quarter
+    // (prevState.ordersInTransit) versus what survived any supply disruption;
+    // regional orders are same-quarter and judged on this quarter's order.
+    const dueFromGlobal = prevState.ordersInTransit || 0;
+    if (dueFromGlobal > 0) {
+      await this.recordSupplierPerformance(
+        simulationId,
+        firmId,
+        quarter,
+        SupplierType.GLOBAL,
+        dueFromGlobal,
+        arrivingParts,
+      );
+    }
+    if (regionalParts > 0) {
+      await this.recordSupplierPerformance(
+        simulationId,
+        firmId,
+        quarter,
+        SupplierType.REGIONAL,
+        regionalParts,
+        regionalParts,
+      );
+    }
 
     // Update firm
     await this.firmModel.updateOne(
@@ -2383,10 +2533,10 @@ export class SimulationService {
       customersInPlay: poolsResult.customersInPlay,
       customersChurned: 0,
       cash: newCash,
-      poOnTime: onTimeRate,
+      poOnTime,
       poInFull: inFull,
       poDamageFree: damageFree,
-      poDocumentation: PO.BASE_DOCUMENTATION,
+      poDocumentation: documentation,
       vmiSnapshot,
     };
   }
@@ -2661,67 +2811,7 @@ export class SimulationService {
     };
   }
 
-  // ============================================================================
-  // PROCESS DC SALES
-  // ============================================================================
-  /**
-   * Process DC Sales - fulfill regional demand from DCs
-   * R1 (East) served by Factory directly
-   * R2 (Central) and R3 (West) served by optional DCs
-   */
-  private processDCSales(
-    dcResult: any,
-    regionalDemand: { R1: number; R2: number; R3: number },
-    factoryFGInventory: number,
-  ): DCSalesResult {
-    // R1 is always served by Factory
-    let factoryInventory = factoryFGInventory;
-    let dcSales = 0;
-    let dcServiceBonus = CONFIG.dc.FACTORY_SERVICE_BONUS;
 
-    // R1 sales from Factory
-    const r1Sales = Math.min(regionalDemand.R1 || 0, factoryInventory);
-    factoryInventory -= r1Sales;
-
-    // R2 Central DC serves Region 2
-    let r2Sales = 0;
-    if (dcResult.dcCentralOpen && dcResult.dcCentralInventory > 0) {
-      r2Sales = Math.min(regionalDemand.R2 || 0, dcResult.dcCentralInventory);
-      dcResult.dcCentralInventory -= r2Sales;
-      dcSales += r2Sales;
-      if (r2Sales > 0) dcServiceBonus += CONFIG.dc.CENTRAL.serviceBonus;
-    } else {
-      // No Central DC - serve R2 from Factory
-      const r2FromFactory = Math.min(regionalDemand.R2 || 0, factoryInventory);
-      factoryInventory -= r2FromFactory;
-      r2Sales = r2FromFactory;
-    }
-
-    // R3 West DC serves Region 3
-    let r3Sales = 0;
-    if (dcResult.dcWestOpen && dcResult.dcWestInventory > 0) {
-      r3Sales = Math.min(regionalDemand.R3 || 0, dcResult.dcWestInventory);
-      dcResult.dcWestInventory -= r3Sales;
-      dcSales += r3Sales;
-      if (r3Sales > 0) dcServiceBonus += CONFIG.dc.WEST.serviceBonus;
-    } else {
-      // No West DC - serve R3 from Factory
-      const r3FromFactory = Math.min(regionalDemand.R3 || 0, factoryInventory);
-      factoryInventory -= r3FromFactory;
-      r3Sales = r3FromFactory;
-    }
-
-    return {
-      r1Sales,
-      r2Sales,
-      r3Sales,
-      dcSales,
-      totalSales: r1Sales + r2Sales + r3Sales,
-      dcServiceBonus,
-      updatedDCResult: dcResult,
-      remainingFactoryInventory: factoryInventory,
-    };
-  }
 
   // ============================================================================
   // SUPPLIER TRACKING METHODS
@@ -2756,8 +2846,8 @@ export class SimulationService {
       expectedDeliveryQuarter:
         supplier.leadTime > 0 ? quarter + supplier.leadTime : quarter,
       actualDeliveryQuarter: quarter + (supplier.leadTime > 0 ? 1 : 0),
-      fillRate: actualDelivered / orderQty,
-      wasDelayed: false,
+      fillRate: orderQty > 0 ? actualDelivered / orderQty : 1,
+      wasDelayed: actualDelivered < orderQty,
       defectiveUnits: Math.round(
         actualDelivered * (1 - performance.qualityRate),
       ),
@@ -2823,6 +2913,164 @@ export class SimulationService {
     }
   }
 
+  /**
+   * Executive supplier scorecard.
+   *
+   * Answers the three questions a CEO actually asks of a supply base -
+   * are they shipping on time, is the material any good, and what is the
+   * price variance to standard - rolled up per supplier across quarters.
+   * Deliberately no part-number level detail.
+   */
+  async getSupplierScorecard(
+    simulationId: string,
+    firmId: string,
+    quarters?: number,
+  ): Promise<any> {
+    const simObjectId = this.toObjectId(simulationId);
+    const firm = await this.resolveFirm(simulationId, firmId);
+
+    const orders = await this.supplierOrderModel
+      .find({ simulation: simObjectId, firm: firm._id })
+      .sort({ quarter: 1 })
+      .lean();
+
+    const limit = quarters ? Number(quarters) : null;
+    const scoped =
+      limit && orders.length > 0
+        ? orders.filter((o) => o.quarter > Math.max(...orders.map((x) => x.quarter)) - limit)
+        : orders;
+
+    const standardCost = CONFIG.costs.RAW_MATERIAL_COST;
+
+    const rollUp = (rows: typeof scoped) => {
+      const ordered = rows.reduce((a, r) => a + (r.quantityOrdered || 0), 0);
+      const received = rows.reduce((a, r) => a + (r.quantityReceived ?? 0), 0);
+      const spend = rows.reduce((a, r) => a + (r.totalCost || 0), 0);
+      const defective = rows.reduce((a, r) => a + (r.defectiveUnits || 0), 0);
+      const onTimeCount = rows.filter((r) => !r.wasDelayed).length;
+      // Purchase price variance against the $150 standard raw material cost.
+      const standardSpend = ordered * standardCost;
+      return {
+        ordersPlaced: rows.length,
+        unitsOrdered: ordered,
+        unitsReceived: received,
+        onTimeDeliveryPct: rows.length > 0 ? (onTimeCount / rows.length) * 100 : null,
+        fillRatePct: ordered > 0 ? (received / ordered) * 100 : null,
+        defectRatePct: received > 0 ? (defective / received) * 100 : null,
+        totalSpend: spend,
+        avgUnitCost: ordered > 0 ? spend / ordered : null,
+        standardUnitCost: standardCost,
+        // Positive PPV = paid above standard.
+        purchasePriceVariance: spend - standardSpend,
+        purchasePriceVariancePct:
+          standardSpend > 0 ? ((spend - standardSpend) / standardSpend) * 100 : null,
+      };
+    };
+
+    const suppliers = Object.values(SupplierType).map((type) => {
+      const rows = scoped.filter((o) => o.supplierType === type);
+      const cfg = SUPPLIER_CONFIG[type];
+      return {
+        supplierType: type,
+        name: cfg.name,
+        location: cfg.location,
+        leadTimeQuarters: cfg.leadTime,
+        ...rollUp(rows),
+        byQuarter: [...new Set(rows.map((r) => r.quarter))]
+          .sort((a, b) => a - b)
+          .map((q) => ({
+            quarter: q,
+            ...rollUp(rows.filter((r) => r.quarter === q)),
+          })),
+      };
+    });
+
+    return {
+      simulationId,
+      firmId: firm._id,
+      firmNumber: firm.firmNumber,
+      standardUnitCost: standardCost,
+      total: rollUp(scoped),
+      suppliers,
+    };
+  }
+
+  /**
+   * Competitive market share reallocation.
+   *
+   * Port of GAS calculateMarketShareChanges_ (flexeemaster.gs:4370-4445).
+   * Each firm is scored per region on price, availability (fill rate), quality
+   * (CSI), trust (cumulative revenue) and awareness (marketing spend), using
+   * that region's weighting. Regional scores normalise to regional shares,
+   * those roll up weighted by region size, and each firm moves 20% of the way
+   * from its current share toward that target. Shares are then renormalised
+   * to sum to 1.
+   *
+   * Without this, every firm sat at 1/numFirms forever and no decision a team
+   * made could win or lose share.
+   */
+  private calculateMarketShareChanges(
+    metrics: Array<{
+      price: number;
+      fillRate: number;
+      csi: number;
+      cumRevenue: number;
+      marketing: number;
+      currentShare: number;
+    }>,
+  ): number[] {
+    const n = metrics.length;
+    if (n === 0) return [];
+    if (n === 1) return [1];
+
+    const M = CONFIG.market;
+    const WEIGHTS = CONFIG.customer.REGIONAL_WEIGHTS;
+    const ADJUSTMENT_RATE = 0.2; // GAS: gradual move toward target
+
+    const prices = metrics.map((m) => m.price);
+    const minPrice = Math.min(...prices);
+    const priceRange = Math.max(...prices) - minPrice || 1;
+    const maxFill = Math.max(...metrics.map((m) => m.fillRate));
+    const maxCSI = Math.max(...metrics.map((m) => m.csi));
+    const maxRevenue = Math.max(...metrics.map((m) => m.cumRevenue));
+    const maxMarketing = Math.max(...metrics.map((m) => m.marketing));
+
+    const regionalShares: Record<number, number[]> = {};
+    for (let region = 1; region <= 3; region++) {
+      const W = WEIGHTS[region];
+      const scores = metrics.map((m) => {
+        const priceScore = 1 - (m.price - minPrice) / priceRange;
+        const fillScore = maxFill > 0 ? m.fillRate / maxFill : 1;
+        const csiScore = maxCSI > 0 ? m.csi / maxCSI : 1;
+        const trustScore = maxRevenue > 0 ? m.cumRevenue / maxRevenue : 1;
+        const marketingScore = maxMarketing > 0 ? m.marketing / maxMarketing : 1;
+        return (
+          priceScore * W.price +
+          fillScore * W.availability +
+          csiScore * W.quality +
+          trustScore * W.trust +
+          marketingScore * W.awareness
+        );
+      });
+      const total = scores.reduce((a, b) => a + b, 0);
+      regionalShares[region] =
+        total > 0 ? scores.map((sc) => sc / total) : metrics.map(() => 1 / n);
+    }
+
+    const targets = metrics.map(
+      (_, i) =>
+        regionalShares[1][i] * M.REGIONS[1].marketShare +
+        regionalShares[2][i] * M.REGIONS[2].marketShare +
+        regionalShares[3][i] * M.REGIONS[3].marketShare,
+    );
+
+    const adjusted = metrics.map(
+      (m, i) => m.currentShare + (targets[i] - m.currentShare) * ADJUSTMENT_RATE,
+    );
+    const sum = adjusted.reduce((a, b) => a + b, 0);
+    return sum > 0 ? adjusted.map((sc) => sc / sum) : metrics.map(() => 1 / n);
+  }
+
   private calculateSupplierPerformance(
     supplier: any,
     orderQty: number,
@@ -2833,19 +3081,16 @@ export class SimulationService {
     flexibility: number;
     costIndex: number;
   } {
-    const V = SUPPLIER_SCORECARD_CONFIG.VARIABILITY;
-    const W = SUPPLIER_SCORECARD_CONFIG.WEIGHTS;
+    // On-time is a fact, not a dice roll: the shipment was on time only if the
+    // full quantity that was due actually landed this quarter. Rolling this
+    // randomly produced scorecards that reported late deliveries in quarters
+    // where every part arrived.
+    const onTimeDelivery = orderQty > 0 ? actualDelivered >= orderQty : true;
 
-    // On-time delivery with variability
-    const onTimeRoll = Math.random();
-    const onTimeThreshold =
-      supplier.baseOnTime + (Math.random() * 2 - 1) * V.onTime;
-    const onTimeDelivery = onTimeRoll < onTimeThreshold;
-
-    // Quality rate with variability
+    // Quality reflects the supplier's own incoming defect rate.
     const qualityRate = Math.min(
       1.0,
-      Math.max(0.0, supplier.baseQuality + (Math.random() * 2 - 1) * V.quality),
+      Math.max(0.0, 1 - supplier.defectRate),
     );
 
     // Cost index (normalized to 100 = baseline)
@@ -2939,42 +3184,7 @@ export class SimulationService {
     };
   }
 
-  private processCustomerChurn(
-    loyalCustomers: number,
-    inPlayCustomers: number,
-    fillRate: number,
-    csi: number,
-    currentPrice: number,
-    previousPrice: number,
-    greenScore: number,
-    warrantyTier: WarrantyTier,
-    greenScoreEnabled: boolean,
-  ) {
-    let churnRate = CONFIG.customer.BASE_CHURN_RATE;
 
-    if (csi < 70) churnRate += 0.03;
-    else if (csi < 80) churnRate += 0.01;
-    else if (csi > 90) churnRate -= 0.02;
-    if (fillRate < 0.9) churnRate += 0.02;
-    else if (fillRate < 0.95) churnRate += 0.01;
-
-    const priceChange = (currentPrice - previousPrice) / previousPrice;
-    if (priceChange > 0.1) churnRate += 0.02;
-    else if (priceChange > 0.05) churnRate += 0.01;
-
-    if (greenScoreEnabled)
-      churnRate *= this.getGreenScoreChurnMultiplier(greenScore);
-    churnRate *= CONFIG.warranty[warrantyTier].churnMultiplier;
-
-    const loyalChurned = Math.round(loyalCustomers * churnRate * 0.5);
-    const inPlayChurned = Math.round(inPlayCustomers * churnRate);
-
-    return {
-      loyal: Math.max(0, loyalCustomers - loyalChurned),
-      inPlay: Math.max(0, inPlayCustomers - inPlayChurned + loyalChurned),
-      churned: loyalChurned + inPlayChurned,
-    };
-  }
 
   // ============================================================================
   // CSI & GREEN SCORE CALCULATIONS
@@ -3147,7 +3357,7 @@ export class SimulationService {
           techSystemsCount: firm.techOwned.length,
           scMaturity,
           techInvestmentTotal: 0,
-          forecastAccuracy: 0.8,
+          forecastAccuracy: Math.max(0, Math.min(1, 1 - actualMape)),
         },
         bsc: {
           financial: bscFinancial,
@@ -4761,6 +4971,15 @@ export class SimulationService {
     }
 
     const quarterResults: any[] = [];
+    const shareMetrics: Array<{
+      firmId: Types.ObjectId;
+      price: number;
+      fillRate: number;
+      csi: number;
+      cumRevenue: number;
+      marketing: number;
+      currentShare: number;
+    }> = [];
 
     for (const firm of firms) {
       const decision = await this.decisionModel.findOne({
@@ -4779,6 +4998,26 @@ export class SimulationService {
         decision.processedAt = new Date();
         await decision.save();
 
+        // Score the firm's own forecast against realised demand. This was
+        // previously only done for pre-history quarters, so every live quarter
+        // had no ForecastLog and MAPE silently defaulted to 0 on the scorecard
+        // and in the SCRM demand-volatility category.
+        await this.recordForecastAccuracy(
+          simObjectId,
+          firm._id as Types.ObjectId,
+          simulation.currentQuarter,
+          {
+            r1: decision.forecastR1 || 0,
+            r2: decision.forecastR2 || 0,
+            r3: decision.forecastR3 || 0,
+          },
+          {
+            demandR1: demandData.demandR1,
+            demandR2: demandData.demandR2,
+            demandR3: demandData.demandR3,
+          },
+        );
+
         // Process the quarter
         const result = await this.processQuarter(
           simObjectId,
@@ -4795,6 +5034,39 @@ export class SimulationService {
           firmNumber: firm.firmNumber,
           result,
         });
+
+        shareMetrics.push({
+          firmId: firm._id as Types.ObjectId,
+          price: decision.priceP1 ?? CONFIG.market.PRODUCTS.P1.basePrice,
+          fillRate: result.fillRate ?? 0,
+          csi: result.csi ?? 0,
+          cumRevenue: (prevState.cumulativeRevenue ?? 0) + (result.revenue ?? 0),
+          marketing: decision.marketingBudget ?? 0,
+          currentShare: prevState.marketShare ?? 1 / firms.length,
+        });
+      }
+    }
+
+    // ======================================================================
+    // COMPETITIVE MARKET SHARE - second pass, needs every firm's result
+    // ======================================================================
+    // GAS runs this after the per-firm loop and writes the new share onto the
+    // quarter just processed, so it drives the following quarter's demand.
+    if (shareMetrics.length > 1) {
+      const newShares = this.calculateMarketShareChanges(shareMetrics);
+      for (let i = 0; i < shareMetrics.length; i++) {
+        await this.quarterStateModel.updateOne(
+          {
+            simulation: simObjectId,
+            firm: shareMetrics[i].firmId,
+            quarter: simulation.currentQuarter,
+          },
+          { $set: { marketShare: newShares[i] } },
+        );
+        const qr = quarterResults.find(
+          (r) => r.firmId.toString() === shareMetrics[i].firmId.toString(),
+        );
+        if (qr) qr.result.marketShare = newShares[i];
       }
     }
 
