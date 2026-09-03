@@ -6,8 +6,20 @@ dotenv.config();
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const allowedOrigins = [
+    'https://flexee-2-adv.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ];
+
   app.enableCors({
-    origin: true,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: '*',
     credentials: true,
